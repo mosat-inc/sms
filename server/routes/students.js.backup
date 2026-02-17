@@ -1,0 +1,600 @@
+const express = require('express');
+const Joi = require('joi');
+const { pool } = require('../config/database');
+const router = express.Router();
+
+// Validation schemas
+const newStudentSchema = Joi.object({
+    // Personal Information
+    first_name: Joi.string().min(2).max(50).required().messages({
+        'string.min': 'First name must be at least 2 characters long',
+        'string.max': 'First name must not exceed 50 characters',
+        'any.required': 'First name is required'
+    }),
+    last_name: Joi.string().min(2).max(50).required().messages({
+        'string.min': 'Last name must be at least 2 characters long',
+        'string.max': 'Last name must not exceed 50 characters',
+        'any.required': 'Last name is required'
+    }),
+    date_of_birth: Joi.date().max('now').required().messages({
+        'date.max': 'Date of birth cannot be in the future',
+        'any.required': 'Date of birth is required'
+    }),
+    gender: Joi.string().valid('Male', 'Female').required().messages({
+        'any.only': 'Gender must be either Male or Female',
+        'any.required': 'Gender is required'
+    }),
+    
+    // Admission Information
+    class_id: Joi.number().integer().positive().required().messages({
+        'number.base': 'Class ID must be a number',
+        'number.integer': 'Class ID must be an integer',
+        'number.positive': 'Class ID must be positive',
+        'any.required': 'Class is required'
+    }),
+    academic_year: Joi.string().pattern(/^\d{4}-\d{4}$/).required().messages({
+        'string.pattern.base': 'Academic year must be in format YYYY-YYYY (e.g., 2024-2025)',
+        'any.required': 'Academic year is required'
+    }),
+    year_of_study: Joi.number().integer().min(2020).max(2030).required().messages({
+        'number.base': 'Year of study must be a number',
+        'number.integer': 'Year of study must be an integer',
+        'number.min': 'Year of study must be between 2020 and 2030',
+        'number.max': 'Year of study must be between 2020 and 2030',
+        'any.required': 'Year of study is required'
+    }),
+    admission_date: Joi.date().default(new Date()),
+    
+    // Optional Information
+    blood_group: Joi.string().valid('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-').optional(),
+    nationality: Joi.string().max(50).default('Tanzanian'),
+    religion: Joi.string().max(50).optional(),
+    address: Joi.string().max(500).optional(),
+    phone: Joi.string().pattern(/^(\+255|0)[67]\d{8}$/).optional().messages({
+        'string.pattern.base': 'Please provide a valid Tanzanian phone number'
+    }),
+    email: Joi.string().email().optional(),
+    medical_conditions: Joi.string().max(1000).optional(),
+    
+    // Supervisor Information
+    supervisor: Joi.object({
+        first_name: Joi.string().min(2).max(50).required(),
+        last_name: Joi.string().min(2).max(50).required(),
+        relationship: Joi.string().valid('Father', 'Mother', 'Guardian', 'Uncle', 'Aunt', 'Grandparent', 'Other').required(),
+        phone: Joi.string().pattern(/^(\+255|0)[67]\d{8}$/).required().messages({
+            'string.pattern.base': 'Please provide a valid Tanzanian phone number for supervisor'
+        }),
+        email: Joi.string().email().optional(),
+        address: Joi.string().max(500).optional(),
+        occupation: Joi.string().max(100).optional(),
+        workplace: Joi.string().max(100).optional()
+    }).required().messages({
+        'any.required': 'Supervisor information is required'
+    })
+});
+
+const promoteStudentSchema = Joi.object({
+    student_id: Joi.number().integer().positive().required().messages({
+        'number.base': 'Student ID must be a number',
+        'number.integer': 'Student ID must be an integer',
+        'number.positive': 'Student ID must be positive',
+        'any.required': 'Student ID is required'
+    }),
+    new_class_id: Joi.number().integer().positive().required().messages({
+        'number.base': 'New class ID must be a number',
+        'number.integer': 'New class ID must be an integer',
+        'number.positive': 'New class ID must be positive',
+        'any.required': 'New class is required'
+    }),
+    new_academic_year: Joi.string().pattern(/^\d{4}-\d{4}$/).required().messages({
+        'string.pattern.base': 'Academic year must be in format YYYY-YYYY (e.g., 2024-2025)',
+        'any.required': 'New academic year is required'
+    }),
+    status: Joi.string().valid('promoted', 'repeated', 'transferred').default('promoted'),
+    remarks: Joi.string().max(500).optional()
+});
+
+// Utility function to generate student ID
+const generateStudentId = async (connection, admissionYear) => {
+    const yearSuffix = admissionYear.split('-')[0].slice(-2); // Get last 2 digits of year
+    const [result] = await connection.execute(
+        'SELECT COUNT(*) as count FROM students WHERE student_id LIKE ?',
+        [`${yearSuffix}%`]
+    );
+    const nextNumber = (result[0].count + 1).toString().padStart(4, '0');
+    return `${yearSuffix}${nextNumber}`;
+};
+
+// Utility function to generate admission number
+const generateAdmissionNumber = async (connection) => {
+    const [result] = await connection.execute(
+        'SELECT MAX(CAST(SUBSTRING(admission_number, 4) AS UNSIGNED)) as max_num FROM students WHERE admission_number LIKE "ADM%"'
+    );
+    const nextNumber = ((result[0].max_num || 0) + 1).toString().padStart(5, '0');
+    return `ADM${nextNumber}`;
+};
+
+// POST /api/students/admit - Register new student
+router.post('/admit', async (req, res) => {
+    const connection = await pool.getConnection();
+    
+    try {
+        // Validate input
+        const { error, value } = newStudentSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: error.details.map(detail => detail.message)
+            });
+        }
+
+        const {
+            first_name, last_name, date_of_birth, gender,
+            class_id, academic_year, year_of_study, admission_date,
+            blood_group, nationality, religion, address, phone, email,
+            medical_conditions, supervisor
+        } = value;
+
+        await connection.beginTransaction();
+
+        // Verify class exists
+        const [classResult] = await connection.execute(
+            'SELECT id, name, level FROM classes WHERE id = ? AND is_active = TRUE',
+            [class_id]
+        );
+
+        if (classResult.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: 'Selected class not found or is inactive'
+            });
+        }
+
+        // Verify academic year exists
+        const [yearResult] = await connection.execute(
+            'SELECT id FROM academic_years WHERE year_name = ? AND is_active = TRUE',
+            [academic_year]
+        );
+
+        if (yearResult.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: 'Selected academic year not found or is inactive'
+            });
+        }
+
+        // Generate unique student ID and admission number
+        const studentId = await generateStudentId(connection, academic_year);
+        const admissionNumber = await generateAdmissionNumber(connection);
+
+        // Create user account
+        const username = `student_${studentId}`;
+        const defaultPassword = date_of_birth.toISOString().split('T')[0].replace(/-/g, ''); // YYYYMMDD format
+        const bcrypt = require('bcrypt');
+        const hashedPassword = await bcrypt.hash(defaultPassword, 12);
+
+        const [userResult] = await connection.execute(`
+            INSERT INTO users (
+                username, email, password, role, first_name, last_name, 
+                firstName, lastName, phone, address, is_active
+            ) VALUES (?, ?, ?, 'student', ?, ?, ?, ?, ?, ?, TRUE)
+        `, [
+            username,
+            email || `${username}@student.ubunifusec.com`,
+            hashedPassword,
+            first_name,
+            last_name,
+            first_name, // Also populate firstName (camelCase)
+            last_name,  // Also populate lastName (camelCase)
+            phone || null,
+            address || null
+        ]);
+
+        const userId = userResult.insertId;
+
+        // Create student record
+        const [studentResult] = await connection.execute(`
+            INSERT INTO students (
+                user_id, student_id, class_id, admission_number, date_of_birth,
+                gender, blood_group, nationality, religion, admission_date,
+                medical_conditions, year_of_study, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        `, [
+            userId, studentId, class_id, admissionNumber, date_of_birth,
+            gender, blood_group || null, nationality, religion || null, admission_date,
+            medical_conditions || null, year_of_study
+        ]);
+
+        const newStudentId = studentResult.insertId;
+
+        // Create supervisor record
+        const [supervisorResult] = await connection.execute(`
+            INSERT INTO supervisors (
+                first_name, last_name, relationship, phone, email, address, 
+                occupation, workplace, is_primary_contact
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+        `, [
+            supervisor.first_name, supervisor.last_name, supervisor.relationship,
+            supervisor.phone, supervisor.email || null, supervisor.address || null,
+            supervisor.occupation || null, supervisor.workplace || null
+        ]);
+
+        const supervisorId = supervisorResult.insertId;
+
+        // Link student with supervisor
+        await connection.execute(`
+            INSERT INTO student_supervisors (
+                student_id, supervisor_id, is_primary_supervisor, emergency_contact
+            ) VALUES (?, ?, TRUE, TRUE)
+        `, [newStudentId, supervisorId]);
+
+        // Create academic history record
+        await connection.execute(`
+            INSERT INTO student_academic_history (
+                student_id, academic_year, class_id, enrollment_date, status
+            ) VALUES (?, ?, ?, ?, 'enrolled')
+        `, [newStudentId, academic_year, class_id, admission_date]);
+
+        // Create initial financial record
+        const [feeStructure] = await connection.execute(
+            'SELECT 500000.00 as default_fee' // Default fee structure - can be made configurable
+        );
+        
+        await connection.execute(`
+            INSERT INTO student_financial_records (
+                student_id, academic_year, total_fees_required, outstanding_balance
+            ) VALUES (?, ?, ?, ?)
+        `, [newStudentId, academic_year, feeStructure[0].default_fee, feeStructure[0].default_fee]);
+
+        await connection.commit();
+
+        res.status(201).json({
+            success: true,
+            message: 'Student admitted successfully',
+            data: {
+                student_id: newStudentId,
+                student_number: studentId,
+                admission_number: admissionNumber,
+                username: username,
+                class: classResult[0].name,
+                academic_year: academic_year,
+                default_password: defaultPassword,
+                supervisor: {
+                    name: `${supervisor.first_name} ${supervisor.last_name}`,
+                    relationship: supervisor.relationship,
+                    phone: supervisor.phone
+                }
+            }
+        });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error('Student admission error:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Request body:', req.body);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to admit student',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+// POST /api/students/promote - Promote existing student to next academic year
+router.post('/promote', async (req, res) => {
+    const connection = await pool.getConnection();
+
+    try {
+        // Validate input
+        const { error, value } = promoteStudentSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: error.details.map(detail => detail.message)
+            });
+        }
+
+        const { student_id, new_class_id, new_academic_year, status, remarks } = value;
+
+        await connection.beginTransaction();
+
+        // Verify student exists and get current info
+        const [studentResult] = await connection.execute(`
+        SELECT s.*, u.first_name, u.last_name, c.name as current_class_name, c.id as current_class_id
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN classes c ON s.class_id = c.id
+            WHERE s.id = ? AND s.status = 'active'
+        `, [student_id]);
+
+        if (studentResult.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                success: false,
+                message: 'Student not found or is not active'
+            });
+        }
+
+        const student = studentResult[0];
+
+        // Verify new class exists
+        const [newClassResult] = await connection.execute(
+            'SELECT id, name, level FROM classes WHERE id = ? AND is_active = TRUE',
+            [new_class_id]
+        );
+
+        if (newClassResult.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: 'New class not found or is inactive'
+            });
+        }
+
+        // Verify academic year exists
+        const [yearResult] = await connection.execute(
+            'SELECT id FROM academic_years WHERE year_name = ? AND is_active = TRUE',
+            [new_academic_year]
+        );
+
+        if (yearResult.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: 'Academic year not found or is inactive'
+            });
+        }
+
+        // Check if student already has a record for this academic year
+        const [existingRecord] = await connection.execute(
+            'SELECT id FROM student_academic_history WHERE student_id = ? AND academic_year = ?',
+            [student_id, new_academic_year]
+        );
+
+        if (existingRecord.length > 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: 'Student already has a record for this academic year'
+            });
+        }
+
+        // Update current academic history record to completed
+        await connection.execute(`
+            UPDATE student_academic_history 
+            SET completion_date = CURDATE(), status = ?
+            WHERE student_id = ? AND completion_date IS NULL
+        `, [status === 'repeated' ? 'repeated' : 'promoted', student_id]);
+
+        // Update student's current class
+        await connection.execute(
+            'UPDATE students SET class_id = ? WHERE id = ?',
+            [new_class_id, student_id]
+        );
+
+        // Create new academic history record
+        await connection.execute(`
+            INSERT INTO student_academic_history (
+                student_id, academic_year, class_id, previous_class_id, 
+                enrollment_date, status, remarks
+            ) VALUES (?, ?, ?, ?, CURDATE(), 'enrolled', ?)
+        `, [student_id, new_academic_year, new_class_id, student.current_class_id, remarks]);
+
+        // Create new financial record for the new academic year
+        const [feeStructure] = await connection.execute(
+            'SELECT 500000.00 as default_fee' // Default fee structure
+        );
+        
+        await connection.execute(`
+            INSERT INTO student_financial_records (
+                student_id, academic_year, total_fees_required, outstanding_balance
+            ) VALUES (?, ?, ?, ?)
+        `, [student_id, new_academic_year, feeStructure[0].default_fee, feeStructure[0].default_fee]);
+
+        await connection.commit();
+
+        res.json({
+            success: true,
+            message: `Student ${status} successfully`,
+            data: {
+                student_name: `${student.first_name} ${student.last_name}`,
+                student_number: student.student_id,
+                previous_class: student.current_class_name,
+                new_class: newClassResult[0].name,
+                academic_year: new_academic_year,
+                status: status
+            }
+        });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error('Student promotion error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to promote student',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+// GET /api/students/classes - Get available classes
+router.get('/classes', async (req, res) => {
+    try {
+        const [classes] = await pool.execute(`
+            SELECT id, name, level, capacity, academic_year,
+            (SELECT COUNT(*) FROM students WHERE class_id = classes.id AND status = 'active') as current_students
+            FROM classes 
+            WHERE is_active = TRUE 
+            ORDER BY level, name
+        `);
+
+        res.json({
+            success: true,
+            message: 'Classes retrieved successfully',
+            data: classes
+        });
+    } catch (error) {
+        console.error('Get classes error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve classes'
+        });
+    }
+});
+
+// GET /api/students/academic-years - Get available academic years
+router.get('/academic-years', async (req, res) => {
+    try {
+        const [academicYears] = await pool.execute(`
+            SELECT id, year_name, start_date, end_date, is_current, is_active
+            FROM academic_years 
+            WHERE is_active = TRUE 
+            ORDER BY year_name DESC
+        `);
+
+        res.json({
+            success: true,
+            message: 'Academic years retrieved successfully',
+            data: academicYears
+        });
+    } catch (error) {
+        console.error('Get academic years error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve academic years'
+        });
+    }
+});
+
+// GET /api/students/search - Search students for promotion
+router.get('/search', async (req, res) => {
+    try {
+        const { query, class_id, academic_year } = req.query;
+
+        let sql = `
+            SELECT 
+                s.id, s.student_id, s.admission_number,
+            u.first_name, u.last_name,
+                c.name as current_class, c.level as current_level,
+                sah.academic_year as current_academic_year,
+                s.status
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN classes c ON s.class_id = c.id
+            LEFT JOIN student_academic_history sah ON s.id = sah.student_id AND sah.completion_date IS NULL
+            WHERE s.status = 'active'
+        `;
+        
+        const params = [];
+
+        if (query) {
+            sql += ` AND (
+            u.first_name LIKE ? OR u.last_name LIKE ? OR
+                s.student_id LIKE ? OR s.admission_number LIKE ?
+            )`;
+            const searchTerm = `%${query}%`;
+            params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+        }
+
+        if (class_id) {
+            sql += ` AND s.class_id = ?`;
+            params.push(class_id);
+        }
+
+        if (academic_year) {
+            sql += ` AND sah.academic_year = ?`;
+            params.push(academic_year);
+        }
+
+        sql += ` ORDER BY u.first_name, u.last_name LIMIT 50`;
+
+        const [students] = await pool.execute(sql, params);
+
+        res.json({
+            success: true,
+            message: 'Students retrieved successfully',
+            data: students
+        });
+    } catch (error) {
+        console.error('Student search error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to search students'
+        });
+    }
+});
+
+// GET /api/students/active - Get all active students
+router.get('/active', async (req, res) => {
+    try {
+        const [students] = await pool.execute(`
+            SELECT 
+                s.id, s.student_id, s.admission_number, s.date_of_birth,
+                s.gender, s.blood_group, s.nationality, s.religion, 
+                s.admission_date, s.status, s.medical_conditions,
+                u.first_name, u.last_name, u.email, u.phone, u.address,
+                c.name as class_name, c.level as class_level
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN classes c ON s.class_id = c.id
+            WHERE s.status = 'active'
+            ORDER BY u.first_name, u.last_name
+        `);
+
+        res.json({
+            success: true,
+            message: 'Active students retrieved successfully',
+            data: students
+        });
+    } catch (error) {
+        console.error('Get active students error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve active students'
+        });
+    }
+});
+
+// GET /api/students/by-class/:classId - Get students by class ID
+router.get('/by-class/:classId', async (req, res) => {
+    try {
+        const { classId } = req.params;
+        
+        const [students] = await pool.execute(`
+            SELECT 
+                s.id, s.student_id, s.admission_number, s.date_of_birth,
+                s.gender, s.blood_group, s.nationality, s.religion, 
+                s.admission_date, s.status, s.medical_conditions,
+                u.first_name, u.last_name, u.email, u.phone, u.address,
+                c.name as class_name, c.level as class_level
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN classes c ON s.class_id = c.id
+            WHERE s.class_id = ? AND s.status = 'active'
+            ORDER BY u.first_name, u.last_name
+        `, [classId]);
+
+        res.json({
+            success: true,
+            message: 'Students retrieved successfully',
+            data: students
+        });
+    } catch (error) {
+        console.error('Get students by class error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve students'
+        });
+    }
+});
+
+module.exports = router;

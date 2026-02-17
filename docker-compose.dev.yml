@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: sms-mysql-dev
+    command: ["--default-authentication-plugin=mysql_native_password", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: sms_database
+      MYSQL_USER: sms_user
+      MYSQL_PASSWORD: sms_password
+    volumes:
+      - db_data_dev:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./database/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sms_network_dev
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: builder
+    container_name: sms-backend-dev
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: sms_user
+      DB_PASSWORD: sms_password
+      DB_NAME: sms_database
+      JWT_SECRET: dev_jwt_secret_key_change_in_production
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npm", "start"]
+    networks:
+      - sms_network_dev
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      target: builder
+    container_name: sms-frontend-dev
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=/api
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    command: ["npm", "start"]
+    networks:
+      - sms_network_dev
+
+volumes:
+  db_data_dev:
+
+networks:
+  sms_network_dev:
+    driver: bridge

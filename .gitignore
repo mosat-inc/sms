@@ -1,0 +1,31 @@
+.env
+.env.*
+server/.env
+server/.env.*
+client/.env
+client/.env.*
+
+node_modules
+client/node_modules
+server/node_modules
+client/node_modules/.cache
+
+server/logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+client/build
+dist
+build
+
+# Runtime/generated data
+uploads
+*.log
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode
+.idea
