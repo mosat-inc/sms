@@ -52,6 +52,11 @@ if (inDocker) {
     dbUser = process.env.DB_USER || 'root';
 }
 
+const isTruthy = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+const sslEnabled = isTruthy(process.env.DB_SSL);
+const sslRejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
+const sslCa = process.env.DB_SSL_CA ? process.env.DB_SSL_CA.replace(/\\n/g, '\n') : undefined;
+
 const dbConfig = {
     host: dbHost,
     port: process.env.DB_PORT || 3306,
@@ -62,6 +67,16 @@ const dbConfig = {
     connectionLimit: 10,
     queueLimit: 0
 };
+
+if (sslEnabled) {
+    dbConfig.ssl = {
+        rejectUnauthorized: sslRejectUnauthorized
+    };
+
+    if (sslCa) {
+        dbConfig.ssl.ca = sslCa;
+    }
+}
 
 console.log(`📊 Database config: ${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
 
@@ -90,8 +105,16 @@ const testConnection = async () => {
         const tempPool = mysql.createPool(tempConfig);
         const tempConnection = await tempPool.getConnection();
         
-        // Create database if it doesn't exist
-        await tempConnection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
+        // Create database if it doesn't exist (managed DBs may block this permission)
+        try {
+            await tempConnection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
+        } catch (error) {
+            if (['ER_DBACCESS_DENIED_ERROR', 'ER_ACCESS_DENIED_ERROR', 'ER_SPECIFIC_ACCESS_DENIED_ERROR'].includes(error.code)) {
+                console.warn(`⚠️  Skipping CREATE DATABASE for managed DB user: ${error.code}`);
+            } else {
+                throw error;
+            }
+        }
         tempConnection.release();
         await tempPool.end();
         
@@ -1024,7 +1047,8 @@ const testConnection = async () => {
         
         // Insert sample teacher and subject assignments if they don't exist
         const [teacherExists] = await connection.execute(
-            'SELECT id FROM users WHERE role = "teacher" LIMIT 1'
+            'SELECT id FROM users WHERE role = ? LIMIT 1',
+            ['teacher']
         );
         
         if (teacherExists.length === 0) {
