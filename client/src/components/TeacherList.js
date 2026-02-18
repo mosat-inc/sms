@@ -2,10 +2,10 @@ import React from 'react';
 import styled from 'styled-components';
 
 const Container = styled.div`
-  background: rgba(255, 255, 255, 0.05);
+  background: #ffffff;
   border-radius: 16px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #e2e8f0;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -13,7 +13,7 @@ const Container = styled.div`
 
 const FiltersBar = styled.div`
   padding: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid #e2e8f0;
   display: flex;
   gap: 15px;
   flex-wrap: wrap;
@@ -33,11 +33,11 @@ const FiltersBar = styled.div`
 `;
 
 const FilterInput = styled.input`
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 10px 15px;
-  color: white;
+  color: #0f172a;
   font-size: 14px;
   min-width: 200px;
   flex: 2;
@@ -52,7 +52,7 @@ const FilterInput = styled.input`
   }
 
   &::placeholder {
-    color: rgba(255, 255, 255, 0.5);
+    color: #64748b;
   }
 
   &:focus {
@@ -63,11 +63,11 @@ const FilterInput = styled.input`
 `;
 
 const FilterSelect = styled.select`
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 10px 15px;
-  color: white;
+  color: #0f172a;
   font-size: 14px;
   min-width: 150px;
   flex: 1;
@@ -82,8 +82,8 @@ const FilterSelect = styled.select`
   }
 
   option {
-    background: #1e293b;
-    color: white;
+    background: #ffffff;
+    color: #0f172a;
   }
 
   &:focus {
@@ -121,21 +121,21 @@ const Table = styled.table`
 `;
 
 const TableHeader = styled.thead`
-  background: rgba(255, 255, 255, 0.1);
+  background: #f8fafc;
 `;
 
 const TableRow = styled.tr`
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid #e2e8f0;
   transition: background 0.2s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: #f8fafc;
   }
 `;
 
 const TableCell = styled.td`
   padding: 15px;
-  color: white;
+  color: #0f172a;
   font-size: 14px;
   vertical-align: top;
   word-wrap: break-word;
@@ -154,7 +154,7 @@ const TableCell = styled.td`
 
 const TableHeaderCell = styled.th`
   padding: 15px;
-  color: #60a5fa;
+  color: #334155;
   font-weight: 600;
   text-align: left;
   font-size: 14px;
@@ -191,10 +191,10 @@ const CardsGrid = styled.div`
 `;
 
 const TeacherCard = styled.div`
-  background: rgba(255, 255, 255, 0.1);
+  background: #ffffff;
   border-radius: 12px;
   padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #e2e8f0;
   transition: all 0.3s ease;
 
   &:hover {
@@ -235,7 +235,7 @@ const CardInfo = styled.div`
 
   p {
     margin: 0;
-    color: rgba(255, 255, 255, 0.7);
+    color: #475569;
     font-size: 14px;
   }
 `;
@@ -250,11 +250,11 @@ const CardDetails = styled.div`
     font-size: 14px;
 
     .label {
-      color: rgba(255, 255, 255, 0.6);
+      color: #64748b;
     }
 
     .value {
-      color: white;
+      color: #0f172a;
       font-weight: 500;
     }
   }
@@ -303,9 +303,9 @@ const ActionButton = styled.button`
     if (props.variant === 'success') return '#10b981';
     if (props.variant === 'warning') return '#f59e0b';
     if (props.variant === 'danger') return '#ef4444';
-    return 'rgba(255, 255, 255, 0.1)';
+    return '#e2e8f0';
   }};
-  color: white;
+  color: ${props => (props.variant ? 'white' : '#0f172a')};
   border: none;
   padding: 8px 12px;
   border-radius: 6px;
@@ -341,7 +341,7 @@ const Pagination = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid #e2e8f0;
   flex-wrap: wrap;
   gap: 15px;
   
@@ -353,7 +353,7 @@ const Pagination = styled.div`
 `;
 
 const PaginationInfo = styled.div`
-  color: rgba(255, 255, 255, 0.7);
+  color: #475569;
   font-size: 14px;
 `;
 
@@ -370,9 +370,9 @@ const PaginationControls = styled.div`
 `;
 
 const PaginationButton = styled.button`
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
   padding: 8px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -380,7 +380,7 @@ const PaginationButton = styled.button`
   transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: #f8fafc;
   }
 
   &:disabled {
@@ -397,7 +397,7 @@ const PaginationButton = styled.button`
 const EmptyState = styled.div`
   text-align: center;
   padding: 60px 20px;
-  color: rgba(255, 255, 255, 0.6);
+  color: #64748b;
 
   i {
     font-size: 4rem;
@@ -408,7 +408,7 @@ const EmptyState = styled.div`
   h3 {
     margin: 0 0 10px 0;
     font-size: 1.5rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: #334155;
   }
 
   p {
@@ -423,7 +423,7 @@ const LoadingOverlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.45);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -559,7 +559,7 @@ const TeacherList = ({
                   <div style={{ fontWeight: '600', marginBottom: '2px' }}>
                     {teacher.first_name} {teacher.last_name}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
                     {teacher.employee_id || 'No ID'}
                   </div>
                 </div>
@@ -568,14 +568,14 @@ const TeacherList = ({
             <TableCell>
               <div style={{ fontSize: '13px' }}>
                 <div style={{ marginBottom: '2px' }}>{teacher.email}</div>
-                <div style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{teacher.phone || 'No phone'}</div>
+                <div style={{ color: '#64748b' }}>{teacher.phone || 'No phone'}</div>
               </div>
             </TableCell>
             <TableCell>
               <div style={{ fontSize: '13px' }}>
                 <div>{teacher.department || teacher.profile_department || 'Unassigned'}</div>
                 {teacher.position && (
-                  <div style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '12px' }}>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>
                     {teacher.position}
                   </div>
                 )}
@@ -589,7 +589,7 @@ const TeacherList = ({
             <TableCell>
               <div style={{ fontSize: '13px' }}>
                 <div>{teacher.classes_assigned || 0} Classes</div>
-                <div style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                <div style={{ color: '#64748b' }}>
                   {teacher.subjects_taught || 0} Subjects
                 </div>
               </div>

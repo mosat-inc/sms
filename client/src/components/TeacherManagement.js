@@ -9,7 +9,7 @@ import EditTeacherModal from './EditTeacherModal';
 import AssignSubjectsModal from './AssignSubjectsModal';
 
 const Container = styled.div`
-  color: white;
+  color: #0f172a;
   padding: 20px;
   width: 100%;
   max-width: 100%;
@@ -82,9 +82,9 @@ const ActionButtons = styled.div`
 const ActionButton = styled.button`
   background: ${props => props.variant === 'primary' ? 
     'linear-gradient(135deg, #3b82f6, #8b5cf6)' : 
-    'rgba(255, 255, 255, 0.1)'};
-  color: white;
-  border: 1px solid ${props => props.variant === 'primary' ? 'transparent' : 'rgba(255, 255, 255, 0.2)'};
+    '#ffffff'};
+  color: ${props => props.variant === 'primary' ? 'white' : '#0f172a'};
+  border: 1px solid ${props => props.variant === 'primary' ? 'transparent' : '#cbd5e1'};
   padding: 12px 24px;
   border-radius: 8px;
   cursor: pointer;
@@ -109,7 +109,7 @@ const ActionButton = styled.button`
   &:hover {
     background: ${props => props.variant === 'primary' ? 
       'linear-gradient(135deg, #2563eb, #7c3aed)' : 
-      'rgba(255, 255, 255, 0.2)'};
+      '#f8fafc'};
     transform: translateY(-2px);
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
   }
@@ -146,12 +146,12 @@ const StatsCards = styled.div`
 `;
 
 const StatCard = styled.div`
-  background: rgba(255, 255, 255, 0.1);
+  background: #ffffff;
   border-radius: 12px;
   padding: 25px;
   text-align: center;
   transition: transform 0.3s ease;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #e2e8f0;
 
   &:hover {
     transform: translateY(-2px);
@@ -171,14 +171,14 @@ const StatCard = styled.div`
   }
 
   .stat-label {
-    color: rgba(255, 255, 255, 0.8);
+    color: #334155;
     font-size: 1rem;
   }
 `;
 
 const ViewToggle = styled.div`
   display: flex;
-  background: rgba(255, 255, 255, 0.1);
+  background: #e2e8f0;
   border-radius: 8px;
   padding: 4px;
   margin-bottom: 20px;
@@ -192,7 +192,7 @@ const ViewToggle = styled.div`
 
 const ViewButton = styled.button`
   background: ${props => props.active ? 'linear-gradient(135deg, #3b82f6, #8b5cf6)' : 'transparent'};
-  color: white;
+  color: ${props => props.active ? 'white' : '#334155'};
   border: none;
   padding: 10px 20px;
   border-radius: 6px;
@@ -214,7 +214,7 @@ const ViewButton = styled.button`
   &:hover {
     background: ${props => props.active ? 
       'linear-gradient(135deg, #2563eb, #7c3aed)' : 
-      'rgba(255, 255, 255, 0.1)'};
+      '#cbd5e1'};
   }
 `;
 
