@@ -1010,18 +1010,51 @@ router.post('/assignments', authenticateToken, async (req, res) => {
       academic_year
     } = req.body;
 
+    const normalizeAcademicYear = (value) => {
+      if (!value && value !== 0) {
+        const y = new Date().getFullYear();
+        return `${y}-${y + 1}`;
+      }
+      const str = String(value).trim();
+      if (/^\d{4}-\d{4}$/.test(str)) return str;
+      if (/^\d{4}$/.test(str)) {
+        const y = Number(str);
+        return `${y}-${y + 1}`;
+      }
+      return null;
+    };
+
     // Validate required fields
-    if (!teacher_id || !subject_id || !class_ids || class_ids.length === 0) {
+    if (!teacher_id || !subject_id || !Array.isArray(class_ids) || class_ids.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Teacher ID, subject ID, and at least one class ID are required'
       });
     }
 
+    const normalizedTeacherId = Number(teacher_id);
+    const normalizedSubjectId = Number(subject_id);
+    const normalizedClassIds = [...new Set(class_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+    const normalizedAcademicYear = normalizeAcademicYear(academic_year);
+
+    if (!normalizedTeacherId || !normalizedSubjectId || normalizedClassIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid teacher, subject, or class IDs'
+      });
+    }
+
+    if (!normalizedAcademicYear) {
+      return res.status(400).json({
+        success: false,
+        message: 'Academic year must be in YYYY-YYYY or YYYY format'
+      });
+    }
+
     // Verify teacher exists
     const teacherCheck = await executeQuery(
       'SELECT id FROM users WHERE id = ? AND role = "teacher"',
-      [teacher_id]
+      [normalizedTeacherId]
     );
 
     if (teacherCheck.rows.length === 0) {
@@ -1034,13 +1067,26 @@ router.post('/assignments', authenticateToken, async (req, res) => {
     // Verify subject exists
     const subjectCheck = await executeQuery(
       'SELECT id FROM subjects WHERE id = ?',
-      [subject_id]
+      [normalizedSubjectId]
     );
 
     if (subjectCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Subject not found'
+      });
+    }
+
+    // Verify classes exist and are active
+    const classCheckPlaceholders = normalizedClassIds.map(() => '?').join(', ');
+    const classCheck = await executeQuery(
+      `SELECT id FROM classes WHERE is_active = TRUE AND id IN (${classCheckPlaceholders})`,
+      normalizedClassIds
+    );
+    if (classCheck.rows.length !== normalizedClassIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more selected classes are invalid or inactive'
       });
     }
 
@@ -1051,22 +1097,26 @@ router.post('/assignments', authenticateToken, async (req, res) => {
       // Check for existing assignments
       const existingQuery = `
         SELECT class_id FROM teacher_subject_assignments 
-        WHERE teacher_id = ? AND subject_id = ? AND class_id IN (${class_ids.map(() => '?').join(', ')})
+        WHERE teacher_id = ? AND subject_id = ? AND academic_year = ? AND class_id IN (${normalizedClassIds.map(() => '?').join(', ')})
       `;
-      const existing = await connection.execute(existingQuery, [teacher_id, subject_id, ...class_ids]);
+      const existing = await connection.execute(existingQuery, [normalizedTeacherId, normalizedSubjectId, normalizedAcademicYear, ...normalizedClassIds]);
       
       if (existing[0].length > 0) {
         const conflictClasses = existing[0].map(row => row.class_id);
-        throw new Error(`Teacher is already assigned to classes: ${conflictClasses.join(', ')} for this subject`);
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `Teacher is already assigned to classes: ${conflictClasses.join(', ')} for this subject in ${normalizedAcademicYear}`
+        });
       }
 
       // Insert new assignments
-      const insertPromises = class_ids.map(class_id => 
+      const insertPromises = normalizedClassIds.map(class_id => 
         connection.execute(`
           INSERT INTO teacher_subject_assignments (
             teacher_id, subject_id, class_id, is_primary_teacher, academic_year
           ) VALUES (?, ?, ?, ?, ?)
-        `, [teacher_id, subject_id, class_id, is_primary_teacher || false, academic_year || new Date().getFullYear()])
+        `, [normalizedTeacherId, normalizedSubjectId, class_id, !!is_primary_teacher, normalizedAcademicYear])
       );
 
       await Promise.all(insertPromises);
@@ -1074,10 +1124,16 @@ router.post('/assignments', authenticateToken, async (req, res) => {
 
       res.status(201).json({
         success: true,
-        message: `Successfully assigned ${class_ids.length} class(es) to teacher`
+        message: `Successfully assigned ${normalizedClassIds.length} class(es) to teacher for ${normalizedAcademicYear}`
       });
     } catch (error) {
       await connection.rollback();
+      if (error.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({
+          success: false,
+          message: 'Some selected assignments already exist. Refresh and try different class selections.'
+        });
+      }
       throw error;
     } finally {
       connection.release();
