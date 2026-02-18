@@ -23,7 +23,16 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const requestUrl = error.config?.url || '';
+    const isAuthEndpoint =
+      requestUrl.includes('/api/auth/login') ||
+      requestUrl.includes('/api/auth/register') ||
+      requestUrl.includes('/api/auth/verify-otp') ||
+      requestUrl.includes('/api/auth/forgot-password') ||
+      requestUrl.includes('/api/auth/reset-password');
+
+    if (status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('sms_token');
       localStorage.removeItem('sms_user');
 

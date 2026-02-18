@@ -24,7 +24,15 @@ parentApi.interceptors.request.use(
 parentApi.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const requestUrl = error.config?.url || '';
+    const isParentAuthEndpoint =
+      requestUrl.includes('/api/parent/login') ||
+      requestUrl.includes('/api/parent/verify') ||
+      requestUrl.includes('/api/parent/forgot-password') ||
+      requestUrl.includes('/api/parent/reset-password');
+
+    if (status === 401 && !isParentAuthEndpoint) {
       clearParentToken();
       toast.warning('Your parent session has expired. Please login again.');
       window.location.href = '/parent/login';
