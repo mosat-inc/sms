@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const Joi = require('joi');
 const Auth = require('../utils/auth');
+const { sendEmail, isEmailEnabled, hasBrevoConfig } = require('../services/emailService');
 const router = express.Router();
 
 // Validation schemas
@@ -41,6 +42,13 @@ const studentAdmissionAccessSchema = Joi.object({
     enabled: Joi.boolean().required().messages({
         'boolean.base': 'Enabled flag must be true or false',
         'any.required': 'Enabled flag is required'
+    })
+});
+
+const emailTestSchema = Joi.object({
+    to: Joi.string().email().required().messages({
+        'string.email': 'A valid recipient email is required',
+        'any.required': 'Recipient email is required'
     })
 });
 
@@ -503,6 +511,85 @@ router.delete('/delete-user', Auth.authenticateToken, Auth.requireRole(['admin']
         res.status(500).json({
             success: false,
             message: 'Internal server error'
+        });
+    }
+});
+
+// GET /api/admin/email/diagnostics - Email delivery diagnostics (Admin only)
+router.get('/email/diagnostics', Auth.authenticateToken, Auth.requireRole(['admin']), async (req, res) => {
+    try {
+        const { pool } = require('../config/database');
+        const diagnostics = {
+            email_notifications_enabled: isEmailEnabled(),
+            brevo_config_present: hasBrevoConfig(),
+            brevo_sender_email_present: !!process.env.BREVO_SENDER_EMAIL,
+            brevo_sender_name: process.env.BREVO_SENDER_NAME || null,
+        };
+
+        let recentLogs = [];
+        try {
+            const [rows] = await pool.execute(
+                `
+                SELECT created_at, context, to_email, subject, status, error_message
+                FROM email_logs
+                ORDER BY id DESC
+                LIMIT 20
+                `
+            );
+            recentLogs = rows || [];
+        } catch (_err) {
+            // Table might not exist yet; diagnostics should still work.
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                diagnostics,
+                recent_logs: recentLogs
+            }
+        });
+    } catch (error) {
+        console.error('Email diagnostics error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to load email diagnostics'
+        });
+    }
+});
+
+// POST /api/admin/email/test - Send test email (Admin only)
+router.post('/email/test', Auth.authenticateToken, Auth.requireRole(['admin']), async (req, res) => {
+    try {
+        const { error, value } = emailTestSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: error.details.map(detail => detail.message)
+            });
+        }
+
+        const { to } = value;
+        const now = new Date();
+        const result = await sendEmail({
+            context: 'admin_test_email',
+            studentId: null,
+            to,
+            subject: `SMS Test Email - ${now.toISOString()}`,
+            html: `<p>This is a test email from SMS backend.</p><p>Time: ${now.toISOString()}</p>`,
+            text: `This is a test email from SMS backend. Time: ${now.toISOString()}`
+        });
+
+        return res.json({
+            success: true,
+            message: 'Test email request processed',
+            data: result
+        });
+    } catch (error) {
+        console.error('Email test error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to send test email'
         });
     }
 });
