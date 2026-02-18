@@ -102,6 +102,20 @@ router.get('/', authenticateToken, async (req, res) => {
         tp.position,
         tp.qualification,
         tp.experience_years,
+        (
+          SELECT c1.id
+          FROM classes c1
+          WHERE c1.class_teacher_id = u.id
+          ORDER BY c1.level, c1.name
+          LIMIT 1
+        ) as class_teacher_for_class_id,
+        (
+          SELECT c2.name
+          FROM classes c2
+          WHERE c2.class_teacher_id = u.id
+          ORDER BY c2.level, c2.name
+          LIMIT 1
+        ) as class_teacher_for_class_name,
         0 as classes_assigned,
         0 as subjects_taught,
         NULL as class_names,
@@ -170,7 +184,21 @@ router.get('/:id', authenticateToken, async (req, res) => {
         tp.experience_years,
         tp.joining_date,
         tp.salary,
-        tp.bio
+        tp.bio,
+        (
+          SELECT c.id
+          FROM classes c
+          WHERE c.class_teacher_id = u.id
+          ORDER BY c.level, c.name
+          LIMIT 1
+        ) as class_teacher_for_class_id,
+        (
+          SELECT c.name
+          FROM classes c
+          WHERE c.class_teacher_id = u.id
+          ORDER BY c.level, c.name
+          LIMIT 1
+        ) as class_teacher_for_class_name
       FROM users u
       LEFT JOIN teacher_profiles tp ON u.id = tp.user_id
       WHERE u.id = ? AND u.role = 'teacher'
@@ -304,7 +332,8 @@ router.post('/', authenticateToken, async (req, res) => {
       experience_years,
       joining_date,
       salary,
-      bio
+      bio,
+      class_teacher_for_class_id
     } = req.body;
 
     // Validate required fields
@@ -530,6 +559,53 @@ router.put('/:id', authenticateToken, async (req, res) => {
             id, employee_id, department, position, qualification,
             specialization, processedExperienceYears, processedJoiningDate, processedSalary, bio
           ]);
+        }
+      }
+
+      // Keep class teacher assignment on classes table in sync
+      if (Object.prototype.hasOwnProperty.call(req.body, 'class_teacher_for_class_id')) {
+        const selectedClassId =
+          class_teacher_for_class_id === '' || class_teacher_for_class_id === null
+            ? null
+            : Number(class_teacher_for_class_id);
+
+        if (selectedClassId !== null && Number.isNaN(selectedClassId)) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid class selected for Class Teacher position'
+          });
+        }
+
+        // Remove this teacher from any previous class teacher slot
+        await connection.execute(
+          'UPDATE classes SET class_teacher_id = NULL WHERE class_teacher_id = ?',
+          [id]
+        );
+
+        if (selectedClassId !== null) {
+          // Validate class exists
+          const [classRows] = await connection.execute(
+            'SELECT id FROM classes WHERE id = ? AND is_active = TRUE LIMIT 1',
+            [selectedClassId]
+          );
+          if (!classRows.length) {
+            await connection.rollback();
+            return res.status(400).json({
+              success: false,
+              message: 'Selected class does not exist or is inactive'
+            });
+          }
+
+          // Ensure class has no other teacher assigned as class teacher
+          await connection.execute(
+            'UPDATE classes SET class_teacher_id = NULL WHERE id = ?',
+            [selectedClassId]
+          );
+          await connection.execute(
+            'UPDATE classes SET class_teacher_id = ? WHERE id = ?',
+            [id, selectedClassId]
+          );
         }
       }
 

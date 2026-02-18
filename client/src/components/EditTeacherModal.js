@@ -210,6 +210,24 @@ const ErrorMessage = styled.div`
 `;
 
 const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
+  const positionOptions = [
+    'Head Teacher',
+    'Senior Teacher',
+    'Teacher',
+    'Assistant Teacher',
+    'Academic Teacher',
+    'Assistant Academic Teacher',
+    'Store Keeper',
+    'Assistant Store Keeper',
+    'Discipline Master',
+    'Assistant Discipline Master',
+    'Class Teacher',
+    'Assistant Class Teacher',
+    'Environmental and Health Teacher',
+    'Assistant Environmental and Health Teacher',
+    'Accountant',
+    'Assistant Accountant'
+  ];
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -226,10 +244,12 @@ const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
     experience_years: '',
     joining_date: '',
     salary: '',
-    bio: ''
+    bio: '',
+    class_teacher_for_class_id: ''
   });
   
   const [loading, setLoading] = useState(false);
+  const [classes, setClasses] = useState([]);
   const [error, setError] = useState('');
   const { api } = useAuth();
 
@@ -252,10 +272,24 @@ const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
         experience_years: teacher.experience_years || '',
         joining_date: teacher.joining_date ? teacher.joining_date.split('T')[0] : '',
         salary: teacher.salary || '',
-        bio: teacher.bio || ''
+        bio: teacher.bio || '',
+        class_teacher_for_class_id: teacher.class_teacher_for_class_id || ''
       });
     }
   }, [teacher]);
+
+  useEffect(() => {
+    const loadClasses = async () => {
+      try {
+        const response = await api.get('/api/classes');
+        setClasses(response.data?.data || []);
+      } catch (fetchError) {
+        console.error('Failed to load classes for class teacher selection:', fetchError);
+      }
+    };
+
+    loadClasses();
+  }, [api]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -283,6 +317,10 @@ const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
       setError('Username is required');
       return false;
     }
+    if (formData.position === 'Class Teacher' && !formData.class_teacher_for_class_id) {
+      setError('Please choose a class for Class Teacher position');
+      return false;
+    }
     return true;
   };
 
@@ -302,7 +340,11 @@ const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
         ...formData,
         experience_years: formData.experience_years === '' || formData.experience_years === null ? 0 : formData.experience_years,
         salary: formData.salary === '' || formData.salary === null ? 0 : formData.salary,
-        joining_date: formData.joining_date === '' || formData.joining_date === null ? null : formData.joining_date
+        joining_date: formData.joining_date === '' || formData.joining_date === null ? null : formData.joining_date,
+        class_teacher_for_class_id:
+          formData.position === 'Class Teacher'
+            ? (formData.class_teacher_for_class_id || null)
+            : null
       };
       
       const response = await api.put(`/api/teachers/${teacher.id}`, processedData);
@@ -455,14 +497,36 @@ const EditTeacherModal = ({ teacher, onClose, onSuccess }) => {
               </FormGroup>
               <FormGroup>
                 <Label>Position</Label>
-                <Input
-                  type="text"
+                <Select
                   name="position"
                   value={formData.position}
                   onChange={handleInputChange}
-                  placeholder="Enter position"
-                />
+                >
+                  <option value="">Select position</option>
+                  {positionOptions.map((position) => (
+                    <option key={position} value={position}>
+                      {position}
+                    </option>
+                  ))}
+                </Select>
               </FormGroup>
+              {formData.position === 'Class Teacher' && (
+                <FormGroup>
+                  <Label>Class Teacher For</Label>
+                  <Select
+                    name="class_teacher_for_class_id"
+                    value={formData.class_teacher_for_class_id}
+                    onChange={handleInputChange}
+                  >
+                    <option value="">Select class</option>
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.id}>
+                        {cls.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormGroup>
+              )}
               <FormGroup>
                 <Label>Experience (Years)</Label>
                 <Input
