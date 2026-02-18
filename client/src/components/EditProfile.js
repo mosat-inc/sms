@@ -370,6 +370,7 @@ const EditProfile = ({ isOpen, onClose }) => {
       const payload = { ...formData };
       if (isTeacher) {
         delete payload.department;
+        delete payload.position;
         delete payload.subjects_taught;
         delete payload.classes_assigned;
       }
@@ -496,17 +497,26 @@ const EditProfile = ({ isOpen, onClose }) => {
             </FormGroup>
             <FormGroup>
               <Label>Position</Label>
-              <Select
-                name="position"
-                value={formData.position}
-                onChange={handleInputChange}
-              >
-                <option value="">Select Position</option>
-                <option value="Head Teacher">Head Teacher</option>
-                <option value="Senior Teacher">Senior Teacher</option>
-                <option value="Teacher">Teacher</option>
-                <option value="Assistant Teacher">Assistant Teacher</option>
-              </Select>
+              {isTeacher ? (
+                <Input
+                  type="text"
+                  value={formData.position || 'Not assigned by admin yet'}
+                  disabled
+                  readOnly
+                />
+              ) : (
+                <Select
+                  name="position"
+                  value={formData.position}
+                  onChange={handleInputChange}
+                >
+                  <option value="">Select Position</option>
+                  <option value="Head Teacher">Head Teacher</option>
+                  <option value="Senior Teacher">Senior Teacher</option>
+                  <option value="Teacher">Teacher</option>
+                  <option value="Assistant Teacher">Assistant Teacher</option>
+                </Select>
+              )}
             </FormGroup>
           </FormRow>
 

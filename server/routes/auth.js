@@ -579,9 +579,10 @@ router.put('/profile', Auth.authenticateToken, async (req, res) => {
                 'employee_id', 'specialization', 'experience_years', 'joining_date'
             ];
 
-            // Teachers cannot self-assign department/subjects/classes in production.
+            // Teachers cannot self-assign organizational fields in production.
             if (currentUserRows[0].role === 'teacher') {
                 delete updateData.department;
+                delete updateData.position;
                 delete updateData.subjects_taught;
                 delete updateData.classes_assigned;
             }
