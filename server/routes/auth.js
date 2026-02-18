@@ -836,7 +836,7 @@ router.put('/change-password', Auth.authenticateToken, async (req, res) => {
         
         // For real database users, change the password
         try {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const { pool } = require('../config/database');
             const connection = await pool.getConnection();
             
@@ -979,7 +979,7 @@ router.put('/first-password-change', Auth.authenticateToken, async (req, res) =>
         }
         
         try {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const { pool } = require('../config/database');
             const connection = await pool.getConnection();
             
@@ -1095,7 +1095,7 @@ router.put('/change-temp-password', Auth.authenticateToken, async (req, res) => 
         }
         
         try {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const { pool } = require('../config/database');
             const connection = await pool.getConnection();
             
@@ -1213,7 +1213,7 @@ router.put('/change-temp-password', Auth.authenticateToken, async (req, res) => 
         }
         
         try {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const { pool } = require('../config/database');
             const connection = await pool.getConnection();
             

@@ -506,7 +506,7 @@ const testConnection = async () => {
         );
         
         if (adminExists.length === 0) {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const hashedPassword = await bcrypt.hash('admin123', 12);
             
             await connection.execute(`
@@ -1052,7 +1052,7 @@ const testConnection = async () => {
         );
         
         if (teacherExists.length === 0) {
-            const bcrypt = require('bcrypt');
+            const bcrypt = require('bcryptjs');
             const hashedPassword = await bcrypt.hash('teacher123', 12);
             
             // Insert sample teacher

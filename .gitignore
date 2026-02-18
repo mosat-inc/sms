@@ -23,6 +23,8 @@ build
 # Runtime/generated data
 uploads
 *.log
+sms_database_dump.sql
+sms_database_dump_clean.sql
 
 # OS/IDE
 .DS_Store

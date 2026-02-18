@@ -7,7 +7,7 @@ const express = require('express');
 const Joi = require('joi');
 const { pool } = require('../config/database');
 const router = express.Router();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 // Import middleware
 const { authenticate, requireAdmin, requireRole } = require('../middleware/authMiddleware');
 const { generateStudentNumber, assignStudentNumber } = require('../utils/studentNumberGenerator');

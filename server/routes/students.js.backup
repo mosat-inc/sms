@@ -173,7 +173,7 @@ router.post('/admit', async (req, res) => {
         // Create user account
         const username = `student_${studentId}`;
         const defaultPassword = date_of_birth.toISOString().split('T')[0].replace(/-/g, ''); // YYYYMMDD format
-        const bcrypt = require('bcrypt');
+        const bcrypt = require('bcryptjs');
         const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
         const [userResult] = await connection.execute(`
