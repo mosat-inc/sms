@@ -534,7 +534,7 @@ router.post('/:id/assign-teacher',
         
         // Verify teacher exists and has teacher role
         const [teacher] = await pool.execute(
-            'SELECT id FROM users WHERE id = ? AND role = "teacher" AND is_active = TRUE',
+            "SELECT id FROM users WHERE id = ? AND role = 'teacher' AND is_active = TRUE",
             [teacher_id]
         );
         

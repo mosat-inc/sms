@@ -451,7 +451,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Check if teacher exists
     const teacherExists = await executeQuery(
-      'SELECT id FROM users WHERE id = ? AND role = "teacher"',
+      "SELECT id FROM users WHERE id = ? AND role = 'teacher'",
       [id]
     );
 
@@ -661,7 +661,7 @@ router.patch('/:id/password', authenticateToken, async (req, res) => {
 
     // Check if teacher exists
     const teacherExists = await executeQuery(
-      'SELECT id FROM users WHERE id = ? AND role = "teacher"',
+      "SELECT id FROM users WHERE id = ? AND role = 'teacher'",
       [id]
     );
 
@@ -718,7 +718,7 @@ router.post('/:id/assignments', authenticateToken, async (req, res) => {
 
     // Check if teacher exists
     const teacherExists = await executeQuery(
-      'SELECT id FROM users WHERE id = ? AND role = "teacher"',
+      "SELECT id FROM users WHERE id = ? AND role = 'teacher'",
       [id]
     );
 
@@ -1053,7 +1053,7 @@ router.post('/assignments', authenticateToken, async (req, res) => {
 
     // Verify teacher exists
     const teacherCheck = await executeQuery(
-      'SELECT id FROM users WHERE id = ? AND role = "teacher"',
+      "SELECT id FROM users WHERE id = ? AND role = 'teacher'",
       [normalizedTeacherId]
     );
 
