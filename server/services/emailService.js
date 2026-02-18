@@ -187,5 +187,5 @@ const sendEmail = async ({ context, studentId, to, subject, html, text }) => {
 module.exports = {
   sendEmail,
   isEmailEnabled,
+  hasBrevoConfig,
 };
-

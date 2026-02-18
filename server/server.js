@@ -12,6 +12,7 @@ const logger = require('./utils/logger');
 const { initializePromotionScheduler } = require('./services/promotionService');
 const { initializeFeeReminderScheduler } = require('./services/feeReminderService');
 const { initializeParentDailyAttendanceEmailScheduler } = require('./services/parentDailyAttendanceEmailService');
+const { isEmailEnabled, hasBrevoConfig } = require('./services/emailService');
 
 // Initialize global error handlers
 initializeGlobalHandlers();
@@ -288,6 +289,16 @@ const startServer = async () => {
         } else {
             logger.warn('⚠️  Database not available. Some features may not work.');
             logger.warn('   Make sure MySQL is installed and running.');
+        }
+
+        // Email delivery diagnostics
+        if (!isEmailEnabled()) {
+            logger.warn('📧 Email notifications are DISABLED (EMAIL_NOTIFICATIONS_ENABLED=false).');
+        } else if (!hasBrevoConfig()) {
+            logger.warn('📧 Email notifications enabled but Brevo config is missing.');
+            logger.warn('   Set BREVO_API_KEY and BREVO_SENDER_EMAIL in environment variables.');
+        } else {
+            logger.info('📧 Email notifications enabled (Brevo config detected).');
         }
         
         // Start the server
