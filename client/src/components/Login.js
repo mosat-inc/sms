@@ -311,7 +311,12 @@ const Login = ({ initialMode = 'teacher' }) => {
 
       toast.error(res.data?.message || 'Login failed');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Login failed. Please try again.');
+      const errorMessage =
+        err?.response?.data?.message ||
+        err?.message ||
+        (Array.isArray(err?.errors) ? err.errors.join(', ') : null) ||
+        'Login failed. Please try again.';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
