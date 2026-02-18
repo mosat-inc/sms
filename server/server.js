@@ -292,7 +292,8 @@ const startServer = async () => {
         
         // Start the server
         const MAX_PORT_ATTEMPTS = 10; // Try up to 10 ports if original is in use
-        const host = process.env.HOST || '127.0.0.1';
+        // On Render/containers we must bind to all interfaces so the platform can detect the open port.
+        const host = process.env.HOST || '0.0.0.0';
 
         const attemptListen = (portToTry) => {
             const server = app.listen(portToTry, host, () => {
