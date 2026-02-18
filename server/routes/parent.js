@@ -251,6 +251,94 @@ const ensureAnnouncementReadsTable = async () => {
   }
 };
 
+let parentNotificationsSchemaEnsured = false;
+const ensureUserNotificationsTable = async () => {
+  if (parentNotificationsSchemaEnsured) return;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS user_notifications (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NULL,
+        student_id INT NULL,
+        type ENUM('attendance','fee','exam','discipline','system') NOT NULL DEFAULT 'system',
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+        data JSON NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+        read_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        INDEX idx_user_unread (user_id, is_read, created_at),
+        INDEX idx_student_unread (student_id, is_read, created_at),
+        INDEX idx_user_type (user_id, type, created_at),
+        INDEX idx_student_type (student_id, type, created_at)
+      )
+    `);
+
+    const [cols] = await connection.execute(
+      `
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'user_notifications'
+      `
+    );
+    const existing = new Set((cols || []).map((r) => r.COLUMN_NAME));
+
+    const safeAdd = async (sql) => {
+      try {
+        await connection.execute(sql);
+      } catch (error) {
+        // Ignore duplicate column/index and keep startup resilient across environments
+        if (!['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME'].includes(error.code)) {
+          throw error;
+        }
+      }
+    };
+
+    if (!existing.has('student_id')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN student_id INT NULL`);
+      await safeAdd(`ALTER TABLE user_notifications ADD CONSTRAINT fk_user_notifications_student_id FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE`);
+    }
+    if (!existing.has('type')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN type ENUM('attendance','fee','exam','discipline','system') NOT NULL DEFAULT 'system'`);
+    }
+    if (!existing.has('title')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT 'Notification'`);
+    }
+    if (!existing.has('message')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN message TEXT NOT NULL`);
+    }
+    if (!existing.has('priority')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium'`);
+    }
+    if (!existing.has('data')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN data JSON NULL`);
+    }
+    if (!existing.has('is_read')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN is_read BOOLEAN DEFAULT FALSE`);
+    }
+    if (!existing.has('read_at')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN read_at TIMESTAMP NULL`);
+    }
+    if (!existing.has('created_at')) {
+      await safeAdd(`ALTER TABLE user_notifications ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+    }
+
+    // Ensure key indexes expected by parent queries
+    await safeAdd(`CREATE INDEX idx_student_unread ON user_notifications (student_id, is_read, created_at)`);
+    await safeAdd(`CREATE INDEX idx_student_type ON user_notifications (student_id, type, created_at)`);
+
+    parentNotificationsSchemaEnsured = true;
+  } finally {
+    connection.release();
+  }
+};
+
 const getParentStudentContext = async (studentId) => {
   const [rows] = await pool.execute(
     `SELECT id, user_id, class_id FROM students WHERE id = ? LIMIT 1`,
@@ -547,6 +635,7 @@ router.get('/announcements/unread-count', authenticateParent, async (req, res) =
 // GET /api/parent/notifications/unread-count - Targeted notifications unread count for this student
 router.get('/notifications/unread-count', authenticateParent, async (req, res) => {
   try {
+    await ensureUserNotificationsTable();
     const studentId = req.parent.student_id;
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as unread_count
@@ -564,6 +653,7 @@ router.get('/notifications/unread-count', authenticateParent, async (req, res) =
 // GET /api/parent/notifications - Targeted notifications feed for this student
 router.get('/notifications', authenticateParent, async (req, res) => {
   try {
+    await ensureUserNotificationsTable();
     const studentId = req.parent.student_id;
     const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 50)));
     const [rows] = await pool.execute(
@@ -586,6 +676,7 @@ router.get('/notifications', authenticateParent, async (req, res) => {
 // POST /api/parent/notifications/:id/mark-read
 router.post('/notifications/:id/mark-read', authenticateParent, async (req, res) => {
   try {
+    await ensureUserNotificationsTable();
     const studentId = req.parent.student_id;
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: 'Invalid notification id' });
@@ -606,6 +697,7 @@ router.post('/notifications/:id/mark-read', authenticateParent, async (req, res)
 // POST /api/parent/notifications/mark-all-read
 router.post('/notifications/mark-all-read', authenticateParent, async (req, res) => {
   try {
+    await ensureUserNotificationsTable();
     const studentId = req.parent.student_id;
     await pool.execute(
       `UPDATE user_notifications
