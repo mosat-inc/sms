@@ -5,6 +5,28 @@ const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType } = r
 const Auth = require('../utils/auth');
 const router = express.Router();
 
+const leadershipPositionRegex = /(headmaster|headmistress|head teacher|academic)/i;
+
+const getUserScopeContext = async (userId) => {
+    const [rows] = await pool.execute(
+        'SELECT id, role, position FROM users WHERE id = ? LIMIT 1',
+        [userId]
+    );
+    const user = rows?.[0];
+    if (!user) {
+        return { role: null, isAdmin: false, isLeadership: false, canViewAllAttendance: false };
+    }
+
+    const isAdmin = user.role === 'admin';
+    const isLeadership = user.role === 'teacher' && leadershipPositionRegex.test(user.position || '');
+    return {
+        role: user.role,
+        isAdmin,
+        isLeadership,
+        canViewAllAttendance: isAdmin || isLeadership
+    };
+};
+
 // Helper function to format date for MySQL DATE column
 const formatDateForMySQL = (dateValue) => {
   if (!dateValue || dateValue === '' || dateValue === null || dateValue === undefined) {
@@ -183,8 +205,9 @@ router.get('/debug-attendance', async (req, res) => {
 router.get('/records', Auth.authenticateToken, async (req, res) => {
     try {
         console.log('📊 Fetching attendance records...');
-        const { classId, startDate, endDate, status } = req.query;
-        console.log('Query params:', { classId, startDate, endDate, status });
+        const { classId, startDate, endDate, status, studentName } = req.query;
+        const scope = await getUserScopeContext(req.user?.id);
+        console.log('Query params:', { classId, startDate, endDate, status, studentName });
         
         let whereConditions = [];
         let queryParams = [];
@@ -208,6 +231,23 @@ router.get('/records', Auth.authenticateToken, async (req, res) => {
             whereConditions.push('a.status = ?');
             queryParams.push(status);
         }
+
+        if (studentName) {
+            whereConditions.push('(u.first_name LIKE ? OR u.last_name LIKE ? OR CONCAT(u.first_name, " ", u.last_name) LIKE ?)');
+            const likeTerm = `%${studentName}%`;
+            queryParams.push(likeTerm, likeTerm, likeTerm);
+        }
+
+        if (!scope.canViewAllAttendance && req.user?.role === 'teacher') {
+            whereConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM teacher_subject_assignments tsa
+                    WHERE tsa.teacher_id = ? AND tsa.class_id = a.class_id
+                )
+            `);
+            queryParams.push(req.user.id);
+        }
         
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         console.log('SQL WHERE clause:', whereClause);
@@ -225,6 +265,8 @@ router.get('/records', Auth.authenticateToken, async (req, res) => {
                 COUNT(CASE WHEN a.status = 'excused' THEN 1 END) as excused_count
             FROM attendance a
             JOIN classes c ON a.class_id = c.id
+            JOIN students s ON s.id = a.student_id
+            JOIN users u ON u.id = s.user_id
             ${whereClause}
             GROUP BY a.date, c.name, c.id
             ORDER BY a.date DESC, c.name
@@ -239,6 +281,229 @@ router.get('/records', Auth.authenticateToken, async (req, res) => {
         console.error('❌ Error fetching attendance records:', error);
         console.error('Error details:', error.message);
         res.status(500).json({ error: 'Failed to fetch attendance records' });
+    }
+});
+
+// Subject attendance dashboard data with role-based scope
+router.get('/subject-dashboard', Auth.authenticateToken, async (req, res) => {
+    try {
+        const today = new Date();
+        const defaultEnd = today.toISOString().split('T')[0];
+        const defaultStartDate = new Date(today);
+        defaultStartDate.setDate(defaultStartDate.getDate() - 6);
+        const defaultStart = defaultStartDate.toISOString().split('T')[0];
+
+        const classId = req.query.classId ? Number(req.query.classId) : null;
+        const subjectId = req.query.subjectId ? Number(req.query.subjectId) : null;
+        const startDate = req.query.startDate || defaultStart;
+        const endDate = req.query.endDate || defaultEnd;
+        const studentName = (req.query.studentName || '').trim();
+
+        const scope = await getUserScopeContext(req.user?.id);
+        if (req.user?.role !== 'admin' && req.user?.role !== 'teacher') {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+
+        const where = ['sa.date BETWEEN ? AND ?'];
+        const params = [startDate, endDate];
+
+        if (classId) {
+            where.push('sa.class_id = ?');
+            params.push(classId);
+        }
+        if (subjectId) {
+            where.push('sa.subject_id = ?');
+            params.push(subjectId);
+        }
+        if (studentName) {
+            where.push('(u.first_name LIKE ? OR u.last_name LIKE ? OR CONCAT(u.first_name, " ", u.last_name) LIKE ?)');
+            const likeTerm = `%${studentName}%`;
+            params.push(likeTerm, likeTerm, likeTerm);
+        }
+
+        if (!scope.canViewAllAttendance && req.user?.role === 'teacher') {
+            where.push(`
+                EXISTS (
+                    SELECT 1 FROM teacher_subject_assignments tsa
+                    WHERE tsa.teacher_id = ? AND tsa.class_id = sa.class_id AND tsa.subject_id = sa.subject_id
+                )
+            `);
+            params.push(req.user.id);
+        }
+
+        const [records] = await pool.execute(
+            `
+            SELECT
+                sa.id,
+                sa.date,
+                sa.status,
+                sa.notes,
+                sa.class_id,
+                sa.subject_id,
+                sa.period_label,
+                c.name as class_name,
+                sub.name as subject_name,
+                st.id as student_id,
+                st.admission_number,
+                u.first_name,
+                u.last_name
+            FROM subject_attendance sa
+            JOIN students st ON st.id = sa.student_id
+            JOIN users u ON u.id = st.user_id
+            JOIN classes c ON c.id = sa.class_id
+            JOIN subjects sub ON sub.id = sa.subject_id
+            WHERE ${where.join(' AND ')}
+            ORDER BY sa.date DESC, u.first_name, u.last_name
+            `,
+            params
+        );
+
+        const dateSet = new Set();
+        const studentMap = new Map();
+        const totals = { present: 0, absent: 0, late: 0, excused: 0 };
+
+        for (const row of records) {
+            const dateKey = new Date(row.date).toISOString().split('T')[0];
+            dateSet.add(dateKey);
+            const key = `${row.student_id}`;
+            if (!studentMap.has(key)) {
+                studentMap.set(key, {
+                    student_id: row.student_id,
+                    admission_number: row.admission_number,
+                    student_name: `${row.first_name} ${row.last_name}`.trim(),
+                    class_id: row.class_id,
+                    class_name: row.class_name,
+                    statuses_by_date: {},
+                    summary: { present: 0, absent: 0, late: 0, excused: 0, total: 0 }
+                });
+            }
+
+            const student = studentMap.get(key);
+            student.statuses_by_date[dateKey] = {
+                status: row.status,
+                subject_id: row.subject_id,
+                subject_name: row.subject_name,
+                notes: row.notes,
+                period_label: row.period_label
+            };
+            if (student.summary[row.status] !== undefined) {
+                student.summary[row.status] += 1;
+                student.summary.total += 1;
+            }
+            if (totals[row.status] !== undefined) totals[row.status] += 1;
+        }
+
+        const dates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+        const students = Array.from(studentMap.values()).sort((a, b) => a.student_name.localeCompare(b.student_name));
+        const absentStudentCount = students.filter((s) => (s.summary.absent || 0) > 0).length;
+
+        const filterScope = [];
+        const filterParams = [];
+        if (!scope.canViewAllAttendance && req.user?.role === 'teacher') {
+            filterScope.push('EXISTS (SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.teacher_id = ? AND tsa.class_id = c.id)');
+            filterParams.push(req.user.id);
+        }
+
+        const [classes] = await pool.execute(
+            `
+            SELECT c.id, c.name as class_name, c.level
+            FROM classes c
+            WHERE c.is_active = TRUE
+            ${filterScope.length ? `AND ${filterScope.join(' AND ')}` : ''}
+            ORDER BY c.level, c.name
+            `,
+            filterParams
+        );
+
+        const [subjects] = await pool.execute(
+            `
+            SELECT DISTINCT sub.id, sub.name
+            FROM subjects sub
+            JOIN teacher_subject_assignments tsa ON tsa.subject_id = sub.id
+            JOIN classes c ON c.id = tsa.class_id
+            WHERE sub.is_active = TRUE
+            ${filterScope.length ? `AND ${filterScope.join(' AND ')}` : ''}
+            ${classId ? 'AND c.id = ?' : ''}
+            ORDER BY sub.name
+            `,
+            classId ? [...filterParams, classId] : filterParams
+        );
+
+        const absWhere = [...where];
+        const absParams = [...params];
+        const [absencesByClass] = await pool.execute(
+            `
+            SELECT c.id as class_id, c.name as class_name, COUNT(*) as absent_count
+            FROM subject_attendance sa
+            JOIN classes c ON c.id = sa.class_id
+            JOIN students st ON st.id = sa.student_id
+            JOIN users u ON u.id = st.user_id
+            WHERE ${absWhere.join(' AND ')} AND sa.status = 'absent'
+            GROUP BY c.id, c.name
+            ORDER BY absent_count DESC, c.name
+            LIMIT 10
+            `,
+            absParams
+        );
+
+        const [absencesBySubject] = await pool.execute(
+            `
+            SELECT sub.id as subject_id, sub.name as subject_name, COUNT(*) as absent_count
+            FROM subject_attendance sa
+            JOIN subjects sub ON sub.id = sa.subject_id
+            JOIN students st ON st.id = sa.student_id
+            JOIN users u ON u.id = st.user_id
+            WHERE ${absWhere.join(' AND ')} AND sa.status = 'absent'
+            GROUP BY sub.id, sub.name
+            ORDER BY absent_count DESC, sub.name
+            LIMIT 10
+            `,
+            absParams
+        );
+
+        const totalMarks = totals.present + totals.absent + totals.late + totals.excused;
+        const attendanceRate = totalMarks > 0 ? ((totals.present + totals.late) / totalMarks) * 100 : 0;
+
+        return res.json({
+            success: true,
+            data: {
+                filters: {
+                    classId,
+                    subjectId,
+                    startDate,
+                    endDate,
+                    studentName
+                },
+                scope: {
+                    is_admin: scope.isAdmin,
+                    is_leadership: scope.isLeadership,
+                    can_view_all: scope.canViewAllAttendance
+                },
+                options: {
+                    classes,
+                    subjects
+                },
+                table: {
+                    dates,
+                    students
+                },
+                performance: {
+                    total_marks: totalMarks,
+                    present: totals.present,
+                    absent: totals.absent,
+                    late: totals.late,
+                    excused: totals.excused,
+                    absent_students: absentStudentCount,
+                    attendance_rate: Number(attendanceRate.toFixed(2)),
+                    not_attended: totals.absent
+                },
+                absences_by_class: absencesByClass,
+                absences_by_subject: absencesBySubject
+            }
+        });
+    } catch (error) {
+        console.error('Subject dashboard error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to load attendance dashboard' });
     }
 });
 

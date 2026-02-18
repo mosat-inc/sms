@@ -8,6 +8,35 @@ const router = express.Router();
 // Apply authentication middleware to all routes
 router.use(Auth.authenticateToken);
 
+const leadershipPositionRegex = /(headmaster|headmistress|head teacher|academic)/i;
+
+const getUserRoleContext = async (userId) => {
+    const [rows] = await pool.execute(
+        'SELECT id, role, position FROM users WHERE id = ? LIMIT 1',
+        [userId]
+    );
+    const user = rows?.[0];
+    if (!user) {
+        return { isAdmin: false, isLeadership: false, canViewAllAttendance: false };
+    }
+
+    const isAdmin = user.role === 'admin';
+    const isLeadership = user.role === 'teacher' && leadershipPositionRegex.test(user.position || '');
+    return {
+        isAdmin,
+        isLeadership,
+        canViewAllAttendance: isAdmin || isLeadership
+    };
+};
+
+const isTeacherAssignedToClass = async (teacherId, classId) => {
+    const [rows] = await pool.execute(
+        `SELECT 1 FROM teacher_subject_assignments WHERE teacher_id = ? AND class_id = ? LIMIT 1`,
+        [teacherId, Number(classId)]
+    );
+    return rows.length > 0;
+};
+
 // GET /api/classes - Get all classes (for admin/teacher assignment purposes)
 router.get('/', async (req, res) => {
     try {
@@ -51,8 +80,29 @@ router.get('/', async (req, res) => {
 router.get('/my-classes', async (req, res) => {
     try {
         const teacherId = req.user?.id;
+        const roleContext = await getUserRoleContext(teacherId);
         
-        console.log('Fetching classes for teacher ID:', teacherId);
+        console.log('Fetching classes for user ID:', teacherId);
+
+        if (roleContext.canViewAllAttendance) {
+            const [allClasses] = await pool.execute(`
+                SELECT
+                    c.id,
+                    c.name as class_name,
+                    c.level,
+                    c.academic_year,
+                    (SELECT COUNT(*) FROM students WHERE class_id = c.id AND status = 'active') as student_count
+                FROM classes c
+                WHERE c.is_active = TRUE
+                ORDER BY c.level, c.name
+            `);
+
+            return res.json({
+                success: true,
+                message: 'Classes retrieved successfully',
+                data: allClasses
+            });
+        }
         
         // Get teacher's actual assigned classes from teacher_subject_assignments table
         const [classes] = await pool.execute(`
@@ -208,6 +258,17 @@ router.get('/:classId/stats', async (req, res) => {
 router.get('/:classId/students', async (req, res) => {
     try {
         const { classId } = req.params;
+        const roleContext = await getUserRoleContext(req.user?.id);
+
+        if (!roleContext.canViewAllAttendance && req.user?.role === 'teacher') {
+            const hasClassAssignment = await isTeacherAssignedToClass(req.user.id, classId);
+            if (!hasClassAssignment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You are not assigned to this class.'
+                });
+            }
+        }
         
         const [students] = await pool.execute(`
             SELECT 
@@ -288,6 +349,17 @@ router.post('/:classId/attendance', requireOnPremises({ allowAdminBypass: true }
         const { classId } = req.params;
         const { date, session, attendance_records } = req.body;
         const teacherId = req.user?.id;
+        const roleContext = await getUserRoleContext(teacherId);
+
+        if (!roleContext.isAdmin && req.user?.role === 'teacher') {
+            const hasClassAssignment = await isTeacherAssignedToClass(teacherId, classId);
+            if (!hasClassAssignment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You are not assigned to this class.'
+                });
+            }
+        }
 
         // Get the current date for validating if edit is allowed
         const today = new Date().toISOString().split('T')[0];
@@ -476,15 +548,25 @@ router.get('/:classId/subject-attendance', async (req, res) => {
       params.push(String(period_label));
     }
 
-    // Teacher scoping: assigned classes only
-    if (req.user?.role === 'teacher') {
+    const roleContext = await getUserRoleContext(req.user?.id);
+
+    // Teacher scoping: assigned classes/subjects unless leadership/admin
+    if (!roleContext.canViewAllAttendance && req.user?.role === 'teacher') {
       where.push(`sa.class_id IN (
         SELECT DISTINCT tsa.class_id
         FROM teacher_subject_assignments tsa
         WHERE tsa.teacher_id = ?
       )`);
       params.push(req.user.id);
-    } else if (req.user?.role !== 'admin') {
+      if (subject_id) {
+        where.push(`sa.subject_id IN (
+          SELECT DISTINCT tsa.subject_id
+          FROM teacher_subject_assignments tsa
+          WHERE tsa.teacher_id = ? AND tsa.class_id = sa.class_id
+        )`);
+        params.push(req.user.id);
+      }
+    } else if (!roleContext.canViewAllAttendance) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
@@ -519,6 +601,17 @@ router.get('/:classId/attendance', async (req, res) => {
     try {
         const { classId } = req.params;
         const { date, session, start_date, end_date } = req.query;
+        const roleContext = await getUserRoleContext(req.user?.id);
+
+        if (!roleContext.canViewAllAttendance && req.user?.role === 'teacher') {
+            const hasClassAssignment = await isTeacherAssignedToClass(req.user.id, classId);
+            if (!hasClassAssignment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You are not assigned to this class.'
+                });
+            }
+        }
 
         let sql = `
             SELECT 
@@ -564,6 +657,70 @@ router.get('/:classId/attendance', async (req, res) => {
             message: 'Failed to retrieve attendance records',
             error: error.message
         });
+    }
+});
+
+// GET /api/classes/:classId/attendance-context - class roster + allowed subjects for attendance
+router.get('/:classId/attendance-context', async (req, res) => {
+    try {
+        const { classId } = req.params;
+        const roleContext = await getUserRoleContext(req.user?.id);
+
+        if (!roleContext.canViewAllAttendance && req.user?.role === 'teacher') {
+            const hasClassAssignment = await isTeacherAssignedToClass(req.user.id, classId);
+            if (!hasClassAssignment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You are not assigned to this class.'
+                });
+            }
+        }
+
+        const [classRows] = await pool.execute(
+            'SELECT id, name as class_name, level, academic_year FROM classes WHERE id = ? AND is_active = TRUE LIMIT 1',
+            [Number(classId)]
+        );
+        if (!classRows.length) {
+            return res.status(404).json({ success: false, message: 'Class not found' });
+        }
+
+        const [students] = await pool.execute(`
+            SELECT 
+                s.id, s.student_id, s.admission_number,
+                u.first_name, u.last_name
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.class_id = ? AND s.status = 'active'
+            ORDER BY u.first_name, u.last_name
+        `, [Number(classId)]);
+
+        let subjectSql = `
+            SELECT DISTINCT sub.id, sub.name
+            FROM subjects sub
+            JOIN teacher_subject_assignments tsa ON tsa.subject_id = sub.id
+            WHERE tsa.class_id = ? AND sub.is_active = TRUE
+        `;
+        const subjectParams = [Number(classId)];
+
+        if (!roleContext.canViewAllAttendance && req.user?.role === 'teacher') {
+            subjectSql += ' AND tsa.teacher_id = ?';
+            subjectParams.push(req.user.id);
+        }
+        subjectSql += ' ORDER BY sub.name';
+
+        const [subjects] = await pool.execute(subjectSql, subjectParams);
+
+        return res.json({
+            success: true,
+            data: {
+                class: classRows[0],
+                students,
+                subjects
+            }
+        });
+    } catch (error) {
+        console.error('Get attendance context error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to load attendance context' });
     }
 });
 

@@ -273,7 +273,9 @@ const AttendanceTracker = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [students, setStudents] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [classData, setClassData] = useState(null);
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [activeSession, setActiveSession] = useState('morning');
   const [attendanceData, setAttendanceData] = useState({});
@@ -293,23 +295,21 @@ const AttendanceTracker = () => {
     []
   );
 
-  const fetchClassData = useCallback(async () => {
-    try {
-      const response = await api.get(`/api/classes/${classId}`);
-      if (response.data?.success) setClassData(response.data.data);
-    } catch (error) {
-      console.error('Error fetching class data:', error);
-      toast.error(error.response?.data?.message || 'Error loading class data');
-    }
-  }, [api, classId]);
-
-  const fetchStudents = useCallback(async () => {
+  const fetchAttendanceContext = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/api/classes/${classId}/students`);
+      const response = await api.get(`/api/classes/${classId}/attendance-context`);
       if (response.data?.success) {
-        const list = response.data.data || [];
+        const payload = response.data.data || {};
+        const list = payload.students || [];
+        const availableSubjects = payload.subjects || [];
+
+        setClassData(payload.class || null);
         setStudents(list);
+        setSubjects(availableSubjects);
+        if (availableSubjects.length > 0) {
+          setSelectedSubjectId((prev) => prev || String(availableSubjects[0].id));
+        }
 
         const initial = {};
         list.forEach((student) => {
@@ -320,9 +320,10 @@ const AttendanceTracker = () => {
         setStudents([]);
       }
     } catch (error) {
-      console.error('Error fetching students:', error);
-      toast.error(error.response?.data?.message || 'Error loading students');
+      console.error('Error fetching attendance context:', error);
+      toast.error(error.response?.data?.message || 'Error loading attendance context');
       setStudents([]);
+      setSubjects([]);
     } finally {
       setLoading(false);
     }
@@ -330,22 +331,24 @@ const AttendanceTracker = () => {
 
   const fetchExistingAttendance = useCallback(async () => {
     try {
-      const response = await api.get(`/api/classes/${classId}/attendance`, {
-        params: { date: selectedDate, session: activeSession },
+      if (!selectedSubjectId) {
+        setExistingAttendance({});
+        return;
+      }
+
+      const response = await api.get(`/api/classes/${classId}/subject-attendance`, {
+        params: { date: selectedDate, subject_id: Number(selectedSubjectId), period_label: activeSession },
       });
-      const data = response.data;
+      const data = response.data?.data || [];
 
       const existing = {};
-      const rows = data?.data || [];
-      if (Array.isArray(rows)) {
-        rows.forEach((record) => {
-          existing[record.student_id] = {
-            status: record.status,
-            notes: record.notes || '',
-            isEditable: true,
-          };
-        });
-      }
+      data.forEach((record) => {
+        existing[record.student_id] = {
+          status: record.status,
+          notes: record.notes || '',
+          isEditable: true,
+        };
+      });
       setExistingAttendance(existing);
 
       setAttendanceData((prev) => {
@@ -358,16 +361,15 @@ const AttendanceTracker = () => {
     } catch (error) {
       // No attendance yet; ignore.
     }
-  }, [activeSession, api, classId, selectedDate]);
+  }, [api, classId, selectedDate, selectedSubjectId, activeSession]);
 
   useEffect(() => {
-    fetchClassData();
-    fetchStudents();
-  }, [fetchClassData, fetchStudents]);
+    fetchAttendanceContext();
+  }, [fetchAttendanceContext]);
 
   useEffect(() => {
-    if (students.length > 0) fetchExistingAttendance();
-  }, [activeSession, fetchExistingAttendance, students.length]);
+    if (students.length > 0 && selectedSubjectId) fetchExistingAttendance();
+  }, [activeSession, fetchExistingAttendance, students.length, selectedSubjectId]);
 
   useEffect(() => {
     if (activeSession === 'afternoon' && !canTakeAfternoon) {
@@ -421,9 +423,15 @@ const AttendanceTracker = () => {
         notes: attendanceData[student.id]?.notes || '',
       }));
 
-      const response = await api.post(`/api/classes/${classId}/attendance`, {
+      if (!selectedSubjectId) {
+        toast.error('Please select a subject first.');
+        return;
+      }
+
+      const response = await api.post(`/api/classes/${classId}/subject-attendance`, {
         date: selectedDate,
-        session: activeSession,
+        subject_id: Number(selectedSubjectId),
+        period_label: activeSession,
         attendance_records: attendanceRecords,
       });
 
@@ -483,7 +491,8 @@ const AttendanceTracker = () => {
               <strong>Class:</strong> {classData?.class_name || '—'}
             </div>
             <div>
-              <strong>Subject:</strong> {classData?.subject_name || '—'}
+              <strong>Subject:</strong>{' '}
+              {subjects.find((s) => String(s.id) === String(selectedSubjectId))?.name || '—'}
             </div>
             <div>
               <strong>Date:</strong>{' '}
@@ -516,6 +525,18 @@ const AttendanceTracker = () => {
           </FormGroup>
 
           <FormGroup>
+            <label>Subject</label>
+            <select value={selectedSubjectId} onChange={(e) => setSelectedSubjectId(e.target.value)}>
+              <option value="">Select subject…</option>
+              {subjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>
+                  {subject.name}
+                </option>
+              ))}
+            </select>
+          </FormGroup>
+
+          <FormGroup>
             <label>Session</label>
             <SessionTabs>
               <div className="tabs">
@@ -535,6 +556,12 @@ const AttendanceTracker = () => {
             </SessionTabs>
           </FormGroup>
         </ControlsGrid>
+        {!subjects.length && (
+          <WarningMessage>
+            <i className="fas fa-exclamation-triangle"></i>
+            <div>No subject assignment found for this class. Ask admin to assign subject and class.</div>
+          </WarningMessage>
+        )}
       </Section>
 
       <Section>
