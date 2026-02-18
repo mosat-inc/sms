@@ -39,16 +39,64 @@ const isRunningInDocker = () => {
 const inDocker = isRunningInDocker();
 console.log(`🔍 Environment detected: ${inDocker ? 'Docker Container' : 'Local Development'}`);
 
-// Database configuration with smart defaults that override .env when needed
-let dbHost, dbUser;
+const sanitizeHost = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return raw;
+    if (raw.includes('://')) {
+        try {
+            const parsed = new URL(raw);
+            return String(parsed.hostname || '').trim();
+        } catch (_err) {
+            // Keep fallback parsing for malformed URLs
+        }
+    }
+    // Handle accidental host values like "user:pass@host:port/db?x=y"
+    let host = raw;
+    host = host.replace(/^.*@/, ''); // strip credentials if present
+    host = host.replace(/\/.*$/, ''); // strip path/query
+    host = host.replace(/:\d+$/, ''); // strip port if appended
+    return host.trim();
+};
 
-if (inDocker) {
+const parseDatabaseUrl = (value) => {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        const dbName = (parsed.pathname || '').replace(/^\//, '').trim();
+        return {
+            host: sanitizeHost(parsed.hostname),
+            port: parsed.port ? Number(parsed.port) : 3306,
+            user: decodeURIComponent(parsed.username || ''),
+            password: decodeURIComponent(parsed.password || ''),
+            database: dbName || undefined,
+            sslMode: parsed.searchParams.get('ssl-mode') || parsed.searchParams.get('sslmode') || ''
+        };
+    } catch (_err) {
+        return null;
+    }
+};
+
+// Database configuration with smart defaults that override .env when needed
+let dbHost;
+let dbUser;
+let dbPort = process.env.DB_PORT || 3306;
+let dbPassword = process.env.DB_PASSWORD || 'allahuma';
+let dbName = process.env.DB_NAME || 'sms_database';
+
+const urlConfig = process.env.DATABASE_URL ? parseDatabaseUrl(process.env.DATABASE_URL) : null;
+
+if (urlConfig?.host) {
+    dbHost = urlConfig.host;
+    dbUser = process.env.DB_USER || urlConfig.user || (inDocker ? 'sms_user' : 'root');
+    dbPort = process.env.DB_PORT || urlConfig.port || 3306;
+    dbPassword = process.env.DB_PASSWORD || urlConfig.password || dbPassword;
+    dbName = process.env.DB_NAME || urlConfig.database || dbName;
+} else if (inDocker) {
     // Running in Docker container - use Docker settings
-    dbHost = process.env.DB_HOST || 'db';
+    dbHost = sanitizeHost(process.env.DB_HOST || 'db');
     dbUser = process.env.DB_USER || 'sms_user';
 } else {
     // Running locally - prefer env, fallback to localhost/root
-    dbHost = process.env.DB_HOST || 'localhost';
+    dbHost = sanitizeHost(process.env.DB_HOST || 'localhost');
     dbUser = process.env.DB_USER || 'root';
 }
 
@@ -59,10 +107,10 @@ const sslCa = process.env.DB_SSL_CA ? process.env.DB_SSL_CA.replace(/\\n/g, '\n'
 
 const dbConfig = {
     host: dbHost,
-    port: process.env.DB_PORT || 3306,
+    port: dbPort,
     user: dbUser,
-    password: process.env.DB_PASSWORD || 'allahuma',
-    database: process.env.DB_NAME || 'sms_database',
+    password: dbPassword,
+    database: dbName,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
@@ -82,6 +130,45 @@ console.log(`📊 Database config: ${dbConfig.user}@${dbConfig.host}:${dbConfig.
 
 // Create connection pool
 const pool = mysql.createPool(dbConfig);
+
+const RETRYABLE_DB_ERROR_CODES = new Set([
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'PROTOCOL_CONNECTION_LOST'
+]);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withDbRetry = async (fn) => {
+    const maxAttempts = Math.max(1, Number(process.env.DB_RETRY_ATTEMPTS || 3));
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+        try {
+            return await fn();
+        } catch (error) {
+            attempt += 1;
+            const code = error?.code || '';
+            const retryable = RETRYABLE_DB_ERROR_CODES.has(code);
+            if (!retryable || attempt >= maxAttempts) {
+                throw error;
+            }
+            const waitMs = 250 * attempt;
+            console.warn(`⚠️  DB transient error (${code}), retrying ${attempt}/${maxAttempts} in ${waitMs}ms`);
+            await sleep(waitMs);
+        }
+    }
+};
+
+// Add retry wrappers for transient DNS/network errors used by routes.
+const rawPoolExecute = pool.execute.bind(pool);
+pool.execute = (...args) => withDbRetry(() => rawPoolExecute(...args));
+const rawPoolQuery = pool.query.bind(pool);
+pool.query = (...args) => withDbRetry(() => rawPoolQuery(...args));
+const rawGetConnection = pool.getConnection.bind(pool);
+pool.getConnection = () => withDbRetry(() => rawGetConnection());
 
 // Test database connection
 const testConnection = async () => {
