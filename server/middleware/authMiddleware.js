@@ -55,7 +55,8 @@ const authenticate = async (req, res, next) => {
         u.role,
         u.first_name,
         u.last_name,
-        u.is_active
+        u.is_active,
+        u.can_student_admission
       FROM users u
       WHERE u.id = ? AND u.is_active = 1
     `;
@@ -78,7 +79,8 @@ const authenticate = async (req, res, next) => {
       email: user.email,
       role: user.role,
       firstName: user.first_name,
-      lastName: user.last_name
+      lastName: user.last_name,
+      can_student_admission: !!user.can_student_admission
     };
 
     next();
@@ -115,7 +117,8 @@ const optionalAuthenticate = async (req, res, next) => {
           u.email,
           u.role,
           u.first_name,
-          u.last_name
+          u.last_name,
+          u.can_student_admission
         FROM users u
         WHERE u.id = ? AND u.is_active = 1
       `;
@@ -130,7 +133,8 @@ const optionalAuthenticate = async (req, res, next) => {
           email: user.email,
           role: user.role,
           firstName: user.first_name,
-          lastName: user.last_name
+          lastName: user.last_name,
+          can_student_admission: !!user.can_student_admission
         };
       }
     } catch (error) {
@@ -190,11 +194,30 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+const requireStudentAdmissionAccess = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+
+  if (req.user.role === 'admin' || req.user.can_student_admission) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: 'Access denied. Student admission permission is required.'
+  });
+};
+
 module.exports = {
   authenticate,
   optionalAuthenticate,
   requireRole,
   requireAdmin,
+  requireStudentAdmissionAccess,
   // Backward compatibility aliases
   requireSchoolAdmin: (req, res, next) => requireAdmin(req, res, next)
 };

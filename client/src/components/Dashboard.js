@@ -442,6 +442,8 @@ const Dashboard = () => {
     }
   };
 
+  const hasStudentAdmissionAccess = user?.role === 'admin' || !!user?.can_student_admission;
+
   const menuItems = [
     { id: 'dashboard', icon: 'fas fa-home', text: 'Dashboard' },
     { id: 'profile', icon: 'fas fa-user-circle', text: 'My Profile' },
@@ -452,7 +454,9 @@ const Dashboard = () => {
       hasSubmenu: true,
       submenuType: 'students',
       submenuItems: [
-        { id: 'student-admission', icon: 'fas fa-user-plus', text: 'Student Admission', action: () => navigate('/students/admission') },
+        ...(hasStudentAdmissionAccess
+          ? [{ id: 'student-admission', icon: 'fas fa-user-plus', text: 'Student Admission', action: () => navigate('/students/admission') }]
+          : []),
         { id: 'view-students', icon: 'fas fa-users', text: 'View Students', action: () => navigate('/students/view') }
       ]
     },

@@ -490,6 +490,25 @@ const AdminUserManagement = () => {
     });
   };
 
+  const handleStudentAdmissionAccess = async (targetUser) => {
+    try {
+      const response = await api.post('/api/admin/student-admission-access', {
+        user_id: targetUser.id,
+        enabled: !targetUser.can_student_admission
+      });
+
+      if (response.data.success) {
+        toast.success(response.data.message);
+        fetchUsers();
+      } else {
+        toast.error('Failed to update student admission access');
+      }
+    } catch (error) {
+      console.error('Error updating student admission access:', error);
+      toast.error(error.response?.data?.message || 'Failed to update student admission access');
+    }
+  };
+
   if (loading) {
     return (
       <UserManagementContainer>
@@ -579,6 +598,15 @@ const AdminUserManagement = () => {
                 {user.is_active ? <FaToggleOff /> : <FaToggleOn />}
                 {user.is_active ? 'Deactivate' : 'Activate'}
               </ActionButton>
+              {user.role === 'teacher' && (
+                <ActionButton
+                  variant="toggle"
+                  onClick={() => handleStudentAdmissionAccess(user)}
+                  title={user.can_student_admission ? 'Revoke Student Admission Access' : 'Grant Student Admission Access'}
+                >
+                  {user.can_student_admission ? 'Revoke Admission Access' : 'Grant Admission Access'}
+                </ActionButton>
+              )}
               <ActionButton
                 variant="delete"
                 onClick={() => setDeleteModal(user)}

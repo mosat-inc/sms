@@ -31,6 +31,19 @@ const deleteUserSchema = Joi.object({
     })
 });
 
+const studentAdmissionAccessSchema = Joi.object({
+    user_id: Joi.number().integer().positive().required().messages({
+        'number.base': 'User ID must be a number',
+        'number.integer': 'User ID must be an integer',
+        'number.positive': 'User ID must be positive',
+        'any.required': 'User ID is required'
+    }),
+    enabled: Joi.boolean().required().messages({
+        'boolean.base': 'Enabled flag must be true or false',
+        'any.required': 'Enabled flag is required'
+    })
+});
+
 // Helper function to generate random password
 const generateRandomPassword = (length = 12) => {
     const lowercase = 'abcdefghijklmnopqrstuvwxyz';
@@ -173,6 +186,7 @@ router.get('/users', Auth.authenticateToken, Auth.requireRole(['admin']), async 
                     u.phone,
                     u.is_active,
                     u.must_change_password,
+                    u.can_student_admission,
                     u.password_reset_at,
                     u.last_login,
                     u.created_at,
@@ -212,6 +226,72 @@ router.get('/users', Auth.authenticateToken, Auth.requireRole(['admin']), async 
     } catch (error) {
         console.error('Fetch users error:', error);
         res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+// POST /api/admin/student-admission-access - Grant/revoke student admission permission (Admin only)
+router.post('/student-admission-access', Auth.authenticateToken, Auth.requireRole(['admin']), async (req, res) => {
+    try {
+        const { error, value } = studentAdmissionAccessSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: error.details.map(detail => detail.message)
+            });
+        }
+
+        const { user_id, enabled } = value;
+        const { pool } = require('../config/database');
+        const connection = await pool.getConnection();
+
+        try {
+            const [rows] = await connection.execute(
+                'SELECT id, username, role FROM users WHERE id = ?',
+                [user_id]
+            );
+
+            if (rows.length === 0) {
+                connection.release();
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            const target = rows[0];
+            if (target.role !== 'teacher') {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student admission permission can only be set for teacher users'
+                });
+            }
+
+            await connection.execute(
+                'UPDATE users SET can_student_admission = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [enabled, user_id]
+            );
+            connection.release();
+
+            return res.json({
+                success: true,
+                message: `Student admission access ${enabled ? 'granted' : 'revoked'} successfully`,
+                data: {
+                    user_id,
+                    can_student_admission: enabled
+                }
+            });
+        } catch (dbError) {
+            connection.release();
+            throw dbError;
+        }
+    } catch (error) {
+        console.error('Student admission access update error:', error);
+        return res.status(500).json({
             success: false,
             message: 'Internal server error'
         });

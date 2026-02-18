@@ -423,6 +423,7 @@ const ResponsiveNavigation = ({
   const navigate = useNavigate();
   const location = useLocation();
   const device = useDevice();
+  const hasStudentAdmissionAccess = user?.role === 'admin' || !!user?.can_student_admission;
 
   // Navigation items based on user role (matching Dashboard menu structure)
   const getNavigationItems = () => {
@@ -435,7 +436,9 @@ const ResponsiveNavigation = ({
         icon: '👨‍🎓',
         hasSubmenu: true,
         submenuItems: [
-          { id: 'student-admission', label: 'Student Admission', icon: '➕', action: () => navigate('/students/admission') },
+          ...(hasStudentAdmissionAccess
+            ? [{ id: 'student-admission', label: 'Student Admission', icon: '➕', action: () => navigate('/students/admission') }]
+            : []),
           { id: 'view-students', label: 'View Students', icon: '👥', action: () => navigate('/students/view') }
         ]
       },

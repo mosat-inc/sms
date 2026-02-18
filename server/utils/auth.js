@@ -15,7 +15,8 @@ class Auth {
             first_name: user.first_name,
             last_name: user.last_name,
             schoolId: user.school_id || null,
-            schoolCode: user.school_code || null
+            schoolCode: user.school_code || null,
+            can_student_admission: !!user.can_student_admission
         };
         
         return jwt.sign(payload, process.env.JWT_SECRET, {
@@ -44,14 +45,14 @@ class Auth {
             if (isEmail) {
                 // If it's an email, search by email primarily
                 query = `SELECT u.id, u.username, u.email, u.password, u.temp_password, u.must_change_password, 
-                         u.role, u.first_name, u.last_name, u.is_active, u.school_id, s.school_code 
+                         u.role, u.first_name, u.last_name, u.is_active, u.school_id, s.school_code, u.can_student_admission
                          FROM users u LEFT JOIN schools s ON u.school_id = s.id 
                          WHERE u.email = ? AND u.is_active = 1`;
                 params = [emailOrUsername];
             } else {
                 // If it's not an email, search by username or email as fallback
                 query = `SELECT u.id, u.username, u.email, u.password, u.temp_password, u.must_change_password, 
-                         u.role, u.first_name, u.last_name, u.is_active, u.school_id, s.school_code 
+                         u.role, u.first_name, u.last_name, u.is_active, u.school_id, s.school_code, u.can_student_admission
                          FROM users u LEFT JOIN schools s ON u.school_id = s.id 
                          WHERE (u.username = ? OR u.email = ?) AND u.is_active = 1`;
                 params = [emailOrUsername, emailOrUsername];
@@ -200,7 +201,7 @@ class Auth {
             
             // Get the created user (without password)
             const [newUser] = await connection.execute(
-                'SELECT id, username, email, role, first_name, last_name FROM users WHERE id = ?',
+                'SELECT id, username, email, role, first_name, last_name, can_student_admission FROM users WHERE id = ?',
                 [result.insertId]
             );
             

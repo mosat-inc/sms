@@ -9,7 +9,7 @@ const { pool } = require('../config/database');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 // Import middleware
-const { authenticate, requireAdmin, requireRole } = require('../middleware/authMiddleware');
+const { authenticate, requireAdmin, requireRole, requireStudentAdmissionAccess } = require('../middleware/authMiddleware');
 const { generateStudentNumber, assignStudentNumber } = require('../utils/studentNumberGenerator');
 const { generateAdmissionNumber } = require('../utils/admissionNumberGenerator');
 const { generateStrongPassword } = require('../utils/passwordGenerator');
@@ -312,12 +312,12 @@ const handleStudentRegister = async (req, res) => {
 /**
  * POST /api/students/admit - Register new student
  */
-router.post('/admit', authenticate, requireAdmin, handleStudentRegister);
+router.post('/admit', authenticate, requireStudentAdmissionAccess, handleStudentRegister);
 
 /**
  * POST /api/students/register - alias of admit (no change to frontend required)
  */
-router.post('/register', authenticate, requireAdmin, handleStudentRegister);
+router.post('/register', authenticate, requireStudentAdmissionAccess, handleStudentRegister);
 
 /**
  * POST /api/students/:id/reset-parent-password

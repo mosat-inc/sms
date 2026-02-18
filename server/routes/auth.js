@@ -228,7 +228,7 @@ router.post('/verify-otp', async (req, res) => {
                 const connection = await pool.getConnection();
                 
                 const [rows] = await connection.execute(
-        'SELECT id, username, email, role, first_name, last_name FROM users WHERE id = ? AND is_active = 1',
+        'SELECT id, username, email, role, first_name, last_name, can_student_admission FROM users WHERE id = ? AND is_active = 1',
                     [user_id]
                 );
                 
@@ -328,7 +328,7 @@ router.get('/profile', Auth.authenticateToken, async (req, res) => {
             console.log('GET profile: Fetching data for userId:', userId);
             
             const [rows] = await connection.execute(
-        'SELECT id, username, email, role, first_name, last_name, phone, address, qualification, experience, department, position, bio, employee_id, specialization, experience_years, joining_date, is_active, created_at, updated_at FROM users WHERE id = ? AND is_active = 1',
+        'SELECT id, username, email, role, first_name, last_name, phone, address, qualification, experience, department, position, bio, employee_id, specialization, experience_years, joining_date, can_student_admission, is_active, created_at, updated_at FROM users WHERE id = ? AND is_active = 1',
                 [userId]
             );
             
@@ -578,6 +578,13 @@ router.put('/profile', Auth.authenticateToken, async (req, res) => {
                 'qualification', 'experience', 'department', 'position', 'bio',
                 'employee_id', 'specialization', 'experience_years', 'joining_date'
             ];
+
+            // Teachers cannot self-assign department/subjects/classes in production.
+            if (currentUserRows[0].role === 'teacher') {
+                delete updateData.department;
+                delete updateData.subjects_taught;
+                delete updateData.classes_assigned;
+            }
             
             const updateFields = [];
             const updateValues = [];
@@ -609,9 +616,11 @@ router.put('/profile', Auth.authenticateToken, async (req, res) => {
                 }
             });
             
-            // Handle teacher assignments using relational tables
+            // Handle teacher assignments using relational tables (admin-managed only)
             let teacherAssignmentsUpdated = false;
-            if (currentUserRows[0].role === 'teacher' && (updateData.subjects_taught !== undefined || updateData.classes_assigned !== undefined)) {
+            if (currentUserRows[0].role === 'teacher' &&
+                req.user?.role === 'admin' &&
+                (updateData.subjects_taught !== undefined || updateData.classes_assigned !== undefined)) {
                 console.log('Processing teacher assignments for relational tables');
                 console.log('Subjects to assign:', updateData.subjects_taught);
                 console.log('Classes to assign:', updateData.classes_assigned);
@@ -688,7 +697,7 @@ router.put('/profile', Auth.authenticateToken, async (req, res) => {
             
             // Get updated user data without JSON columns
             const [userRows] = await connection.execute(
-        'SELECT id, username, email, role, first_name, last_name, phone, address, qualification, experience, department, position, bio, employee_id, specialization, experience_years, joining_date, is_active FROM users WHERE id = ?',
+        'SELECT id, username, email, role, first_name, last_name, phone, address, qualification, experience, department, position, bio, employee_id, specialization, experience_years, joining_date, can_student_admission, is_active FROM users WHERE id = ?',
                 [userId]
             );
             

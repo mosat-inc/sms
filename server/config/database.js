@@ -269,6 +269,15 @@ const testConnection = async () => {
 	            }
 	        }
 
+	        // Permission flag: allow non-admin users to access student admission when explicitly granted by admin.
+	        try {
+	            await connection.execute(`ALTER TABLE users ADD COLUMN can_student_admission BOOLEAN NOT NULL DEFAULT FALSE`);
+	        } catch (error) {
+	            if (error.code !== 'ER_DUP_FIELDNAME') {
+	                throw error;
+	            }
+	        }
+
 	        // Add FK if possible (ignore if already exists or cannot be created).
 	        try {
 	            await connection.execute(

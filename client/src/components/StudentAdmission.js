@@ -317,7 +317,7 @@ const LoadingSpinner = styled.div`
 
 const StudentAdmission = () => {
   const { api, user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const hasStudentAdmissionAccess = user?.role === 'admin' || !!user?.can_student_admission;
   const [activeTab, setActiveTab] = useState('new');
   const [loading, setLoading] = useState(false);
   const [classes, setClasses] = useState([]); // Form 1 & 5 for new registration
@@ -373,11 +373,11 @@ const StudentAdmission = () => {
   });
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!hasStudentAdmissionAccess) return;
     fetchClasses();
     fetchAllClasses();
     fetchAcademicYears();
-  }, [isAdmin]);
+  }, [hasStudentAdmissionAccess]);
 
   useEffect(() => {
     if (activeTab === 'existing') {
@@ -755,7 +755,7 @@ const StudentAdmission = () => {
     }
   };
 
-  if (!isAdmin) {
+  if (!hasStudentAdmissionAccess) {
     return (
       <Container>
         <Header>
@@ -765,7 +765,7 @@ const StudentAdmission = () => {
 
         <Card>
           <h2 style={{ color: '#111827', marginBottom: '8px' }}>Access denied</h2>
-          <div style={{ color: '#6b7280' }}>Student Admission is available to Admin/Registrar only.</div>
+          <div style={{ color: '#6b7280' }}>Student Admission is available only when granted by an administrator.</div>
         </Card>
       </Container>
     );

@@ -261,6 +261,7 @@ const CancelButton = styled(Button)`
 
 const EditProfile = ({ isOpen, onClose }) => {
   const { user, updateProfile } = useAuth();
+  const isTeacher = user?.role === 'teacher';
   const [loading, setLoading] = useState(false);
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -366,14 +367,21 @@ const EditProfile = ({ isOpen, onClose }) => {
     setLoading(true);
 
     try {
+      const payload = { ...formData };
+      if (isTeacher) {
+        delete payload.department;
+        delete payload.subjects_taught;
+        delete payload.classes_assigned;
+      }
+
       console.log('EditProfile: Form submission with data:', {
-        subjects_taught: formData.subjects_taught,
-        classes_assigned: formData.classes_assigned,
-        full_form_data: formData
+        subjects_taught: payload.subjects_taught,
+        classes_assigned: payload.classes_assigned,
+        full_form_data: payload
       });
       
       // Call the actual updateProfile function
-      const result = await updateProfile(formData);
+      const result = await updateProfile(payload);
       
       if (result.success) {
         toast.success('Profile updated successfully!');
@@ -465,17 +473,26 @@ const EditProfile = ({ isOpen, onClose }) => {
           <FormRow $columns="1fr 1fr">
             <FormGroup>
               <Label>Department</Label>
-              <Select
-                name="department"
-                value={formData.department}
-                onChange={handleInputChange}
-              >
-                <option value="">Select Department</option>
-                <option value="Science Department">Science Department</option>
-                <option value="Arts Department">Arts Department</option>
-                <option value="Commercial Department">Commercial Department</option>
-                <option value="Technical Department">Technical Department</option>
-              </Select>
+              {isTeacher ? (
+                <Input
+                  type="text"
+                  value={formData.department || 'Not assigned by admin yet'}
+                  disabled
+                  readOnly
+                />
+              ) : (
+                <Select
+                  name="department"
+                  value={formData.department}
+                  onChange={handleInputChange}
+                >
+                  <option value="">Select Department</option>
+                  <option value="Science Department">Science Department</option>
+                  <option value="Arts Department">Arts Department</option>
+                  <option value="Commercial Department">Commercial Department</option>
+                  <option value="Technical Department">Technical Department</option>
+                </Select>
+              )}
             </FormGroup>
             <FormGroup>
               <Label>Position</Label>
@@ -562,55 +579,69 @@ const EditProfile = ({ isOpen, onClose }) => {
             </FormGroup>
           </FormRow>
 
-          <FormGroup>
-            <Label>Subjects Taught</Label>
-            <CheckboxContainer>
-              <CheckboxGrid>
-                {availableSubjects.map((subject) => (
-                  <CheckboxItem key={subject}>
-                    <input
-                      type="checkbox"
-                      checked={formData.subjects_taught?.some(item => 
-                        (typeof item === 'string' ? item : item.name) === subject
-                      ) || false}
-                      onChange={(e) => handleCheckboxChange('subjects_taught', subject, e.target.checked)}
-                    />
-                    <span>{subject}</span>
-                  </CheckboxItem>
-                ))}
-              </CheckboxGrid>
-              {formData.subjects_taught?.length > 0 && (
-                <SelectedCount>
-                  {formData.subjects_taught.length} subject{formData.subjects_taught.length !== 1 ? 's' : ''} selected
-                </SelectedCount>
-              )}
-            </CheckboxContainer>
-          </FormGroup>
+          {isTeacher ? (
+            <FormGroup>
+              <Label>Teaching Assignment</Label>
+              <Input
+                type="text"
+                value="Subjects and classes are assigned by admin only."
+                disabled
+                readOnly
+              />
+            </FormGroup>
+          ) : (
+            <>
+              <FormGroup>
+                <Label>Subjects Taught</Label>
+                <CheckboxContainer>
+                  <CheckboxGrid>
+                    {availableSubjects.map((subject) => (
+                      <CheckboxItem key={subject}>
+                        <input
+                          type="checkbox"
+                          checked={formData.subjects_taught?.some(item => 
+                            (typeof item === 'string' ? item : item.name) === subject
+                          ) || false}
+                          onChange={(e) => handleCheckboxChange('subjects_taught', subject, e.target.checked)}
+                        />
+                        <span>{subject}</span>
+                      </CheckboxItem>
+                    ))}
+                  </CheckboxGrid>
+                  {formData.subjects_taught?.length > 0 && (
+                    <SelectedCount>
+                      {formData.subjects_taught.length} subject{formData.subjects_taught.length !== 1 ? 's' : ''} selected
+                    </SelectedCount>
+                  )}
+                </CheckboxContainer>
+              </FormGroup>
 
-          <FormGroup>
-            <Label>Classes Assigned</Label>
-            <CheckboxContainer>
-              <CheckboxGrid>
-                {availableClasses.map((className) => (
-                  <CheckboxItem key={className}>
-                    <input
-                      type="checkbox"
-                      checked={formData.classes_assigned?.some(item => 
-                        (typeof item === 'string' ? item : item.name) === className
-                      ) || false}
-                      onChange={(e) => handleCheckboxChange('classes_assigned', className, e.target.checked)}
-                    />
-                    <span>Form {className}</span>
-                  </CheckboxItem>
-                ))}
-              </CheckboxGrid>
-              {formData.classes_assigned?.length > 0 && (
-                <SelectedCount>
-                  {formData.classes_assigned.length} class{formData.classes_assigned.length !== 1 ? 'es' : ''} assigned
-                </SelectedCount>
-              )}
-            </CheckboxContainer>
-          </FormGroup>
+              <FormGroup>
+                <Label>Classes Assigned</Label>
+                <CheckboxContainer>
+                  <CheckboxGrid>
+                    {availableClasses.map((className) => (
+                      <CheckboxItem key={className}>
+                        <input
+                          type="checkbox"
+                          checked={formData.classes_assigned?.some(item => 
+                            (typeof item === 'string' ? item : item.name) === className
+                          ) || false}
+                          onChange={(e) => handleCheckboxChange('classes_assigned', className, e.target.checked)}
+                        />
+                        <span>Form {className}</span>
+                      </CheckboxItem>
+                    ))}
+                  </CheckboxGrid>
+                  {formData.classes_assigned?.length > 0 && (
+                    <SelectedCount>
+                      {formData.classes_assigned.length} class{formData.classes_assigned.length !== 1 ? 'es' : ''} assigned
+                    </SelectedCount>
+                  )}
+                </CheckboxContainer>
+              </FormGroup>
+            </>
+          )}
 
           <FormGroup>
             <Label>Bio</Label>
