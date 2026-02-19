@@ -482,6 +482,12 @@ router.post('/:classId/subject-attendance', requireOnPremises({ allowAdminBypass
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
+    const [subjectRows] = await connection.execute(
+      `SELECT id, name FROM subjects WHERE id = ? LIMIT 1`,
+      [Number(subject_id)]
+    );
+    const subjectName = subjectRows?.[0]?.name || `Subject ${Number(subject_id)}`;
+
     await connection.beginTransaction();
 
     await connection.execute(
@@ -512,6 +518,38 @@ router.post('/:classId/subject-attendance', requireOnPremises({ allowAdminBypass
     }
 
     await connection.commit();
+
+    // Create parent notifications/emails for notable statuses in subject attendance.
+    try {
+      const notable = (attendance_records || []).filter(
+        (r) => r?.status === 'absent' || r?.status === 'late' || r?.status === 'excused'
+      );
+      for (const r of notable) {
+        const statusLabel =
+          r.status === 'absent' ? 'Absent' : r.status === 'late' ? 'Late' : r.status === 'excused' ? 'Excused' : 'Update';
+        await createParentNotificationForStudent({
+          studentId: r.student_id,
+          type: 'attendance',
+          priority: r.status === 'absent' ? 'high' : 'medium',
+          title: `Attendance ${statusLabel} (${subjectName})`,
+          message: `Attendance status for ${subjectName} on ${date} (${period_label}): ${statusLabel}.`,
+          data: {
+            class_id: Number(classId),
+            subject_id: Number(subject_id),
+            subject_name: subjectName,
+            date,
+            period_label: String(period_label),
+            start_time: start_time || null,
+            end_time: end_time || null,
+            status: r.status,
+            notes: r.notes || null,
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('Subject attendance notifications skipped:', notifyErr.message);
+    }
+
     return res.json({ success: true, message: 'Subject attendance saved' });
   } catch (error) {
     await connection.rollback();
