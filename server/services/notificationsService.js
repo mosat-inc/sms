@@ -263,9 +263,14 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
               message: rest.message,
             }),
           });
+        } else {
+          console.warn(`SMS skipped: no parent phone for student_id=${studentId}`);
         }
-      } catch (_smsErr) {
-        // Ignore SMS failures in background notification path
+      } catch (smsErr) {
+        console.warn(
+          `SMS send failed for student_id=${studentId}:`,
+          smsErr?.response?.data || smsErr?.message || 'Unknown error'
+        );
       }
 
       const emails = await getParentEmailsForStudent(studentId);
@@ -288,8 +293,8 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
         html: emailContent.html,
         text: emailContent.text,
       });
-    } catch (_e) {
-      // Never throw from background email
+    } catch (e) {
+      console.warn(`Parent notification background task failed for student_id=${studentId}:`, e?.message || e);
     }
   });
 };
