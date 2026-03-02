@@ -66,13 +66,42 @@ const sendMultiSMS = async ({ toList, text, from }) => {
   if (!recipients.length || !bodyText) throw new Error('Valid "toList" and "text" are required');
 
   const url = `${getBaseUrl()}/api/sms/v1/text/multi`;
-  const payload = {
-    from: String(from || process.env.NEXTSMS_SENDER_ID || '').trim() || undefined,
+  const sender = String(from || process.env.NEXTSMS_SENDER_ID || '').trim() || undefined;
+
+  // Provider variants:
+  // 1) { from, to: [...], text }
+  // 2) { from, messages: [{ to, text }, ...] }  <-- required by some NextSMS proxy setups
+  const payloadWithMessages = {
+    from: sender,
+    messages: recipients.map((to) => ({ to, text: bodyText })),
+  };
+  const payloadLegacy = {
+    from: sender,
     to: recipients,
     text: bodyText,
   };
 
-  const response = await axios.post(url, payload, {
+  try {
+    const response = await axios.post(url, payloadWithMessages, {
+      headers: {
+        Authorization: buildAuthHeader(),
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      timeout: 15000,
+    });
+    return response.data;
+  } catch (error) {
+    const providerMsg = String(error?.response?.data?.message || error?.response?.data?.error || error?.message || '');
+    const requiresLegacyPayload =
+      error?.response?.status === 422 && providerMsg.toLowerCase().includes('invalid request');
+
+    if (!requiresLegacyPayload) {
+      throw error;
+    }
+  }
+
+  const response = await axios.post(url, payloadLegacy, {
     headers: {
       Authorization: buildAuthHeader(),
       'Content-Type': 'application/json',
@@ -80,7 +109,6 @@ const sendMultiSMS = async ({ toList, text, from }) => {
     },
     timeout: 15000,
   });
-
   return response.data;
 };
 
