@@ -3,6 +3,7 @@ const { pool } = require('../config/database');
 const PDFDocument = require('pdfkit');
 const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType } = require('docx');
 const Auth = require('../utils/auth');
+const attendanceFaceRoutes = require('./attendance-face');
 const router = express.Router();
 
 const leadershipPositionRegex = /(headmaster|headmistress|head teacher|academic)/i;
@@ -54,6 +55,9 @@ const formatDateForMySQL = (dateValue) => {
 // Attendance writes must be attributed to the authenticated user (teacher/admin).
 // Some read/debug routes can remain public for troubleshooting, but mutating routes
 // must require auth so `marked_by` is accurate.
+
+// Face attendance endpoints mounted under /api/attendance/face
+router.use('/face', attendanceFaceRoutes);
 
 // Test endpoint to check database connection
 router.get('/test', async (req, res) => {

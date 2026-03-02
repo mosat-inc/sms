@@ -4,6 +4,7 @@ const { addTotalMarksColumn } = require('../migrations/add_total_marks_column');
 const { addTimetables } = require('../migrations/add_timetables');
 const { addAdmissionSequencesAndParentAccess } = require('../migrations/add_admission_sequences_and_parent_access');
 const { addPesapalPaymentIntents } = require('../migrations/add_pesapal_payment_intents');
+const { addFaceAttendanceTables } = require('../migrations/add_face_attendance_tables');
 const { updateDefaultSchoolFeeTo75000 } = require('../migrations/update_default_school_fee_75000');
 const { initializeDatabase, testConnection } = require('../config/database');
 
@@ -47,7 +48,10 @@ const runAllMigrations = async () => {
         console.log('\n📝 6. Running Pesapal payment intents migration...');
         await addPesapalPaymentIntents();
 
-        console.log('\n📝 7. Updating default school fee to 75,000...');
+        console.log('\n📝 7. Running face attendance tables migration...');
+        await addFaceAttendanceTables();
+
+        console.log('\n📝 8. Updating default school fee to 75,000...');
         await updateDefaultSchoolFeeTo75000();
         
         console.log('\n═══════════════════════════════════════════════');
