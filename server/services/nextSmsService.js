@@ -67,49 +67,72 @@ const sendMultiSMS = async ({ toList, text, from }) => {
 
   const url = `${getBaseUrl()}/api/sms/v1/text/multi`;
   const sender = String(from || process.env.NEXTSMS_SENDER_ID || '').trim() || undefined;
+  const baseHeaders = {
+    Authorization: buildAuthHeader(),
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
 
-  // Provider variants:
-  // 1) { from, to: [...], text }
-  // 2) { from, messages: [{ to, text }, ...] }  <-- required by some NextSMS proxy setups
-  const payloadWithMessages = {
+  // Provider payload variants seen in different NextSMS gateways.
+  const payloadMessagesToText = {
     from: sender,
     messages: recipients.map((to) => ({ to, text: bodyText })),
   };
-  const payloadLegacy = {
+  const payloadMessagesRecipientMessage = {
+    from: sender,
+    messages: recipients.map((to) => ({ recipient: to, message: bodyText })),
+  };
+  const payloadLegacyToArray = {
     from: sender,
     to: recipients,
     text: bodyText,
   };
 
-  try {
-    const response = await axios.post(url, payloadWithMessages, {
-      headers: {
-        Authorization: buildAuthHeader(),
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      timeout: 15000,
-    });
-    return response.data;
-  } catch (error) {
-    const providerMsg = String(error?.response?.data?.message || error?.response?.data?.error || error?.message || '');
-    const requiresLegacyPayload =
-      error?.response?.status === 422 && providerMsg.toLowerCase().includes('invalid request');
+  const attempts = [
+    { label: 'messages.to+text', payload: payloadMessagesToText },
+    { label: 'messages.recipient+message', payload: payloadMessagesRecipientMessage },
+    { label: 'legacy.to+text', payload: payloadLegacyToArray },
+  ];
 
-    if (!requiresLegacyPayload) {
-      throw error;
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const response = await axios.post(url, attempt.payload, {
+        headers: baseHeaders,
+        timeout: 15000,
+      });
+      return response.data;
+    } catch (error) {
+      lastError = error;
     }
   }
 
-  const response = await axios.post(url, payloadLegacy, {
-    headers: {
-      Authorization: buildAuthHeader(),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    timeout: 15000,
-  });
-  return response.data;
+  // Ultimate compatibility fallback: send one-by-one via the single endpoint.
+  const singleResults = [];
+  for (const to of recipients) {
+    try {
+      const result = await sendSingleSMS({ to, text: bodyText, from: sender });
+      singleResults.push({ to, ok: true, result });
+    } catch (error) {
+      singleResults.push({
+        to,
+        ok: false,
+        error: error?.response?.data || error?.message || 'Unknown error',
+      });
+    }
+  }
+
+  const anySuccess = singleResults.some((x) => x.ok);
+  if (anySuccess) {
+    return {
+      fallback: 'single',
+      success_count: singleResults.filter((x) => x.ok).length,
+      failure_count: singleResults.filter((x) => !x.ok).length,
+      results: singleResults,
+    };
+  }
+
+  throw lastError || new Error('Failed to send SMS via both multi and single endpoints');
 };
 
 module.exports = {
