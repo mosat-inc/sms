@@ -255,7 +255,7 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
       try {
         const phones = await getParentPhonesForStudent(studentId);
         if (phones.length) {
-          await sendMultiSMS({
+          const smsResult = await sendMultiSMS({
             toList: phones,
             text: buildNotificationSmsText({
               student,
@@ -263,6 +263,7 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
               message: rest.message,
             }),
           });
+          console.log(`SMS sent/queued for student_id=${studentId} phones=${phones.length}`, smsResult);
         } else {
           console.warn(`SMS skipped: no parent phone for student_id=${studentId}`);
         }

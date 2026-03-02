@@ -1116,12 +1116,17 @@ router.post('/:classId/:date', Auth.authenticateToken, async (req, res) => {
             // Best-effort parent notifications for absences from this attendance endpoint.
             setImmediate(async () => {
                 try {
+                    const statusSet = [...new Set((attendance || []).map((r) => String(r?.status || '').toLowerCase()))];
                     const absentStudentIds = [...new Set(
                         (attendance || [])
                             .filter((r) => String(r?.status || '').toLowerCase() === 'absent')
                             .map((r) => Number(r.student_id))
                             .filter((id) => Number.isFinite(id))
                     )];
+
+                    console.log(
+                      `Attendance SMS trigger check class=${classId} date=${formattedDate} statuses=${statusSet.join(',')} absent_count=${absentStudentIds.length}`
+                    );
 
                     for (const studentId of absentStudentIds) {
                         await createParentNotificationForStudent({
