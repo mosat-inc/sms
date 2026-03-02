@@ -18,6 +18,9 @@ import {
 } from './shared/StyledComponents';
 import { mediaQuery } from '../hooks/useDevice';
 
+const TEMPLATE_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+const TEMPLATE_MIN_ROWS = 14;
+
 const Container = styled(PageContainer)`
   padding: 20px;
   box-sizing: border-box;
@@ -106,61 +109,95 @@ const Select = styled.select`
 const TableWrap = styled.div`
   width: 100%;
   overflow-x: auto;
-  border: 1px solid ${colors.border};
-  border-radius: ${borderRadius.medium};
-  background: ${colors.cardBackground};
+  border: 1px solid #d1d5db;
+  border-radius: ${borderRadius.small};
+  background: #f3f4f6;
+  padding: 12px;
+`;
+
+const TemplateHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  gap: 12px;
+`;
+
+const TemplateTitle = styled.h2`
+  margin: 0;
+  color: #111827;
+  font-size: 2rem;
+  font-weight: 800;
+`;
+
+const NameLine = styled.div`
+  margin-top: 4px;
+  font-size: 1rem;
+  color: #111827;
+  font-weight: 700;
 `;
 
 const TimetableTable = styled.table`
   width: 100%;
   border-collapse: collapse;
-  min-width: 840px;
+  min-width: 980px;
+  border: 2px solid #111827;
+  table-layout: fixed;
 
   th,
   td {
-    padding: 12px;
-    border-bottom: 1px solid ${colors.borderLight};
-    text-align: left;
-    vertical-align: top;
+    padding: 10px 8px;
+    border: 1px solid #374151;
+    text-align: center;
+    vertical-align: middle;
     color: ${colors.textPrimary};
+    white-space: pre-line;
+    word-break: break-word;
   }
 
   th {
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: ${colors.textSecondary};
-    background: 'transparent';
+    font-size: 1.05rem;
+    text-transform: none;
+    letter-spacing: normal;
+    color: #111827;
+    font-weight: 800;
+  }
+
+  tbody td {
+    min-height: 48px;
+    height: 48px;
+    font-size: 0.86rem;
+  }
+
+  th:first-child,
+  td:first-child {
+    width: 170px;
+    border-right: 3px solid #111827;
+    font-weight: 700;
+    background: #ffffff;
+  }
+
+  thead th {
+    border-bottom: 2px solid #111827;
   }
 `;
 
-const CellBadge = styled.div`
-  display: inline-flex;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.1;
-  background: ${(p) =>
-    p.kind === 'break'
-      ? 'rgba(245, 158, 11, 0.12)'
-      : p.kind === 'free'
-        ? 'rgba(148, 163, 184, 0.18)'
-        : 'rgba(59, 130, 246, 0.12)'};
-  color: ${(p) =>
-    p.kind === 'break'
-      ? '#b45309'
-      : p.kind === 'free'
-        ? '#334155'
-        : '#1d4ed8'};
-`;
+const dayHeaderColors = [
+  { web: '#93c5fd', pdf: [147, 197, 253] }, // Monday
+  { web: '#a3e635', pdf: [163, 230, 53] }, // Tuesday
+  { web: '#fde047', pdf: [253, 224, 71] }, // Wednesday
+  { web: '#fda4af', pdf: [253, 164, 175] }, // Thursday
+  { web: '#c4b5fd', pdf: [196, 181, 253] }, // Friday
+];
 
 function groupByDayAndSlot(entries) {
   const map = new Map();
   for (const e of entries || []) {
-    const day = e.day_of_week ?? 0;
-    if (!map.has(day)) map.set(day, new Map());
-    map.get(day).set(e.slot_key, e);
+    const day = Number(e.day_of_week);
+    const dayIndex = Number.isFinite(day) ? (day >= 1 && day <= 5 ? day - 1 : day >= 0 && day <= 4 ? day : null) : null;
+    if (dayIndex === null) continue;
+    if (!map.has(dayIndex)) map.set(dayIndex, new Map());
+    map.get(dayIndex).set(e.slot_key, e);
   }
   return map;
 }
@@ -172,6 +209,56 @@ function buildTimetableCellText({ slotKey, cell }) {
   const subject = cell?.subject_name || 'SUBJECT';
   const teacher = cell?.teacher_name ? `\n${cell.teacher_name}` : '';
   return `${subject}${teacher}`;
+}
+
+function buildTimePeriodLabel(slot) {
+  const start = slot.start_time?.slice(0, 5);
+  const end = slot.end_time?.slice(0, 5);
+  const range = start && end ? `${start}-${end}` : '';
+
+  let left = slot.label || range || slot.slot_key;
+
+  if (slot.slot_key === 'FOOD') {
+    left = range || slot.label || 'FOOD';
+  } else if (range) {
+    const normalizedLabel = String(slot.label || '').replace(/\s+/g, '').toLowerCase();
+    const normalizedRange = range.replace(/\s+/g, '').toLowerCase();
+    if (normalizedLabel && !normalizedLabel.includes(normalizedRange)) {
+      left = `${range}\n${slot.label}`;
+    } else {
+      left = slot.label || range;
+    }
+  }
+
+  return left;
+}
+
+function getDayIndexFromMetaDay(day) {
+  const label = String(day?.label || '').trim().toLowerCase();
+  const labelIndex = TEMPLATE_WEEKDAYS.findIndex((d) => d.toLowerCase() === label);
+  if (labelIndex !== -1) return labelIndex;
+
+  const key = Number(day?.key);
+  if (Number.isFinite(key)) {
+    if (key >= 1 && key <= 5) return key - 1;
+    if (key >= 0 && key <= 4) return key;
+  }
+  return null;
+}
+
+function normalizeTemplateDays(days) {
+  const normalized = TEMPLATE_WEEKDAYS.map((label, index) => ({ key: index, label, index }));
+  for (const day of days || []) {
+    const index = getDayIndexFromMetaDay(day);
+    if (index === null) continue;
+    normalized[index] = {
+      ...day,
+      key: index,
+      label: TEMPLATE_WEEKDAYS[index],
+      index,
+    };
+  }
+  return normalized;
 }
 
 const Timetable = () => {
@@ -190,7 +277,7 @@ const Timetable = () => {
   const downloadPDF = useCallback(() => {
     const meta = data?.meta;
     const slots = meta?.slots || [];
-    const days = meta?.days || [];
+    const days = normalizeTemplateDays(meta?.days || []);
     const entries = data?.entries || [];
 
     if (!slots.length || !days.length) {
@@ -207,69 +294,42 @@ const Timetable = () => {
     const year = selectedYear || 'Academic Year';
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(30);
     doc.text('Timetable', 14, 18);
-
-    doc.setFontSize(14);
-    doc.text('UBUNIFU SECONDARY SCHOOL', pageWidth - 14, 14, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text('Student Management System', pageWidth - 14, 20, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(13);
     doc.text('Name:', 14, 30);
     doc.setFont('helvetica', 'bold');
     doc.text(`${className}`, 30, 30);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    doc.text(`${title} • ${year}`, 14, 38);
 
     // Match the provided template: columns are days; rows are time/period.
     const head = [['Time / period', ...days.map((d) => d.label)]];
-    const body = slots.map((slot) => {
-      const start = slot.start_time?.slice(0, 5);
-      const end = slot.end_time?.slice(0, 5);
-      const range = start && end ? `${start}-${end}` : '';
+    const slotRows = slots.map((slot) => ({
+      slotKey: slot.slot_key,
+      left: buildTimePeriodLabel(slot),
+    }));
+    const emptyRows = Array.from({ length: Math.max(0, TEMPLATE_MIN_ROWS - slotRows.length) }, (_, idx) => ({
+      slotKey: `__blank-${idx}`,
+      left: '',
+    }));
+    const rows = [...slotRows, ...emptyRows];
 
-      let left = slot.label || range || slot.slot_key;
-
-      // Avoid repeating the same time twice (e.g. "08:00-09:00" on two lines).
-      if (slot.slot_key === 'FOOD') {
-        // Keep the time column strictly as time/period (no labels like "FOOD").
-        left = range || slot.label || 'FOOD';
-      } else if (range) {
-        const normalizedLabel = String(slot.label || '').replace(/\s+/g, '').toLowerCase();
-        const normalizedRange = range.replace(/\s+/g, '').toLowerCase();
-        if (normalizedLabel && !normalizedLabel.includes(normalizedRange)) {
-          left = `${range}\n${slot.label}`;
-        } else {
-          left = slot.label || range;
-        }
-      }
-
+    const body = rows.map((row) => {
       return [
-        left,
+        row.left,
         ...days.map((d) => {
-          const row = byDay.get(d.key) || new Map();
-          return buildTimetableCellText({ slotKey: slot.slot_key, cell: row.get(slot.slot_key) });
+          if (String(row.slotKey).startsWith('__blank-')) return '';
+          const dayRow = byDay.get(d.index) || new Map();
+          return buildTimetableCellText({ slotKey: row.slotKey, cell: dayRow.get(row.slotKey) });
         }),
       ];
     });
 
-    const dayHeaderColors = [
-      [147, 197, 253], // Monday - light blue
-      [163, 230, 53], // Tuesday - lime
-      [253, 224, 71], // Wednesday - yellow
-      [253, 164, 175], // Thursday - pink
-      [196, 181, 253], // Friday - purple
-    ];
-
     autoTable(doc, {
-      startY: 44,
+      startY: 36,
       head,
       body,
       theme: 'grid',
@@ -277,7 +337,7 @@ const Timetable = () => {
         font: 'helvetica',
         fontSize: 9,
         cellPadding: 3,
-        valign: 'top',
+        valign: 'middle',
         textColor: [15, 23, 42],
         lineColor: [0, 0, 0],
         lineWidth: 0.6,
@@ -296,7 +356,7 @@ const Timetable = () => {
           // Color day headers like the reference image.
           if (hookData.column.index === 0) return;
           const idx = hookData.column.index - 1;
-          hookData.cell.styles.fillColor = dayHeaderColors[idx] || [229, 231, 235];
+          hookData.cell.styles.fillColor = dayHeaderColors[idx]?.pdf || [229, 231, 235];
           hookData.cell.styles.textColor = [0, 0, 0];
           hookData.cell.styles.halign = 'center';
           hookData.cell.styles.valign = 'middle';
@@ -312,25 +372,8 @@ const Timetable = () => {
           return;
         }
 
-        const raw = String(hookData.cell.raw || '');
-        if (raw === 'BREAK') {
-          hookData.cell.styles.fillColor = [255, 255, 255];
-          hookData.cell.styles.textColor = [0, 0, 0];
-          hookData.cell.styles.fontStyle = 'bold';
-          hookData.cell.styles.halign = 'center';
-          hookData.cell.styles.valign = 'middle';
-        } else if (raw === 'FOOD') {
-          hookData.cell.styles.fillColor = [220, 252, 231];
-          hookData.cell.styles.textColor = [0, 0, 0];
-          hookData.cell.styles.fontStyle = 'bold';
-          hookData.cell.styles.halign = 'center';
-          hookData.cell.styles.valign = 'middle';
-        } else if (!raw) {
-          hookData.cell.styles.fillColor = [255, 255, 255];
-        } else {
-          hookData.cell.styles.fillColor = [255, 255, 255];
-          hookData.cell.styles.textColor = [15, 23, 42];
-        }
+        hookData.cell.styles.fillColor = [255, 255, 255];
+        hookData.cell.styles.textColor = [15, 23, 42];
       },
       didDrawPage: (hookData) => {
         // Outer border for a "drafted" look.
@@ -345,6 +388,10 @@ const Timetable = () => {
         }
       },
     });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`Generated timetable • ${title} • ${year}`, 14, 204);
 
     const filename = `timetable-${activeTab}-${String(className).replaceAll(' ', '-')}-${year}.pdf`.replaceAll(
       '/',
@@ -448,10 +495,21 @@ const Timetable = () => {
   }, [fetchTimetable]);
 
   const meta = data?.meta;
-  const slots = meta?.slots || [];
-  const days = meta?.days || [];
+  const slots = useMemo(() => meta?.slots || [], [meta?.slots]);
+  const days = useMemo(() => normalizeTemplateDays(meta?.days || []), [meta?.days]);
+  const className =
+    (classes || []).find((c) => String(c.id) === String(selectedClass))?.name ||
+    `Class ${selectedClass || ''}`.trim();
 
   const byDay = useMemo(() => groupByDayAndSlot(data?.entries || []), [data?.entries]);
+  const visibleRows = useMemo(() => {
+    const base = slots.map((slot) => ({ slotKey: slot.slot_key, left: buildTimePeriodLabel(slot) }));
+    const blanks = Array.from({ length: Math.max(0, TEMPLATE_MIN_ROWS - base.length) }, (_, idx) => ({
+      slotKey: `__blank-${idx}`,
+      left: '',
+    }));
+    return [...base, ...blanks];
+  }, [slots]);
 
   return (
     <Container>
@@ -534,58 +592,47 @@ const Timetable = () => {
           <div style={{ color: colors.textSecondary }}>Loading...</div>
         ) : (
           <TableWrap>
+            <TemplateHeader>
+              <div>
+                <TemplateTitle>Timetable</TemplateTitle>
+                <NameLine>Name: {className}</NameLine>
+              </div>
+            </TemplateHeader>
             <TimetableTable>
               <thead>
                 <tr>
-                  <th style={{ width: 140 }}>Day</th>
-                  {slots.map((s) => (
-                    <th key={s.slot_key}>
-                      {s.label}
-                      <div style={{ fontSize: 12, fontWeight: 500, textTransform: 'none' }}>
-                        {s.start_time?.slice(0, 5)}-{s.end_time?.slice(0, 5)}
-                      </div>
+                  <th>Time / period</th>
+                  {days.map((d, index) => (
+                    <th key={d.key} style={{ background: dayHeaderColors[index]?.web || '#e5e7eb' }}>
+                      {d.label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {days.map((d) => {
-                  const row = byDay.get(d.key) || new Map();
+                {visibleRows.map((rowDef) => {
                   return (
-                    <tr key={d.key}>
-                      <td style={{ fontWeight: 700 }}>{d.label}</td>
-                      {slots.map((s) => {
-                        const cell = row.get(s.slot_key);
-                        const kind =
-                          cell?.kind ||
-                          (s.slot_key === 'BREAK' || s.slot_key === 'FOOD' ? 'break' : 'free');
-                        const title =
-                          kind === 'break'
-                            ? s.slot_key === 'FOOD'
-                              ? 'FOOD'
-                              : 'BREAK'
-                            : kind === 'free'
-                              ? 'FREE'
-                              : cell?.subject_name || 'SUBJECT';
-                        const sub =
-                          kind === 'subject' && cell?.teacher_name ? `Teacher: ${cell.teacher_name}` : '';
+                    <tr key={rowDef.slotKey}>
+                      <td>{rowDef.left}</td>
+                      {days.map((d) => {
+                        if (String(rowDef.slotKey).startsWith('__blank-')) {
+                          return (
+                            <td key={`${rowDef.slotKey}-${d.key}`} />
+                          );
+                        }
+                        const dayRow = byDay.get(d.index) || new Map();
+                        const cell = dayRow.get(rowDef.slotKey);
+                        const title = buildTimetableCellText({ slotKey: rowDef.slotKey, cell });
                         return (
-                          <td key={`${d.key}-${s.slot_key}`}>
-                            <CellBadge kind={kind}>{title}</CellBadge>
-                            {sub && (
-                              <div style={{ marginTop: 6, fontSize: 12, color: colors.textSecondary }}>
-                                {sub}
-                              </div>
-                            )}
-                          </td>
+                          <td key={`${rowDef.slotKey}-${d.key}`}>{title}</td>
                         );
                       })}
                     </tr>
                   );
                 })}
-                {days.length === 0 && (
+                {(days.length === 0 || visibleRows.length === 0) && (
                   <tr>
-                    <td colSpan={1 + slots.length} style={{ padding: 14, color: colors.textSecondary }}>
+                    <td colSpan={1 + Math.max(days.length, 1)} style={{ padding: 14, color: colors.textSecondary }}>
                       No timetable meta available.
                     </td>
                   </tr>
