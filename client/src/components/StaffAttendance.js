@@ -35,6 +35,19 @@ const Hero = styled(Card)`
   border: 1px solid rgba(99, 102, 241, 0.22);
   background: linear-gradient(135deg, rgba(30, 58, 138, 0.12), rgba(99, 102, 241, 0.1), rgba(255, 255, 255, 0.88));
   box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: auto -80px -120px auto;
+    width: 280px;
+    height: 280px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(14, 165, 233, 0.3), rgba(14, 165, 233, 0));
+    z-index: -1;
+  }
 `;
 
 const ActionsRow = styled.div`
@@ -82,6 +95,109 @@ const SessionCard = styled(Card)`
   box-shadow: ${shadows.card};
   display: grid;
   gap: 10px;
+`;
+
+const HeroGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 14px;
+  ${mediaQuery('tablet')} {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const HeroPanel = styled.div`
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: ${borderRadius.large};
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 10px;
+`;
+
+const HeroLabel = styled.div`
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  color: rgba(15, 23, 42, 0.55);
+`;
+
+const HeroValue = styled.div`
+  font-size: 1.1rem;
+  font-weight: 950;
+  color: ${colors.textPrimary};
+`;
+
+const SessionQuickGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+`;
+
+const SessionQuickCard = styled.div`
+  border-radius: ${borderRadius.large};
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+`;
+
+const StrongButton = styled.button`
+  border: none;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-weight: 900;
+  color: #fff;
+  background: linear-gradient(135deg, #0f766e, #0369a1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(3, 105, 161, 0.26);
+    filter: saturate(1.05);
+  }
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
+const NeutralButton = styled.button`
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 850;
+  color: ${colors.textPrimary};
+  background: rgba(255, 255, 255, 0.94);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+`;
+
+const FaceStrip = styled.div`
+  border: 1px solid rgba(2, 132, 199, 0.22);
+  border-radius: ${borderRadius.large};
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.08), rgba(14, 116, 144, 0.05));
+  display: grid;
+  gap: 10px;
+`;
+
+const DetailGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  ${mediaQuery('tablet')} {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const FaceModalBackdrop = styled.div`
@@ -407,7 +523,7 @@ const StaffAttendance = () => {
         },
       };
     },
-    []
+    [setFaceMessage]
   );
 
   const captureDescriptors = useCallback(async () => {
@@ -568,7 +684,6 @@ const StaffAttendance = () => {
       fetchMe,
       loadModelsOnDemand,
       runLivenessChallenge,
-      setFaceMessage,
       startCamera,
       stopCamera,
       user?.id,
@@ -593,59 +708,78 @@ const StaffAttendance = () => {
       </PageHeader>
 
       <Hero>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'grid', gap: 6, minWidth: 240 }}>
-            <div style={{ fontWeight: 950, color: colors.textPrimary, fontSize: '1.1rem' }}>
-              Today: {formatDateLong(today)}
-            </div>
+        <HeroGrid>
+          <HeroPanel>
+            <HeroLabel>Today</HeroLabel>
+            <HeroValue>{formatDateLong(today)}</HeroValue>
             <div style={{ color: colors.textSecondary, fontWeight: 850 }}>
               Staff: <strong>{user?.first_name || user?.firstName || '—'} {user?.last_name || user?.lastName || ''}</strong>
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Badge>
-              <FaClock /> Deadlines: {morningDeadline} / {afternoonDeadline}
-            </Badge>
-            <SecondaryButton onClick={fetchMe} disabled={loading} style={{ borderRadius: 999 }}>
-              <FaSyncAlt /> Refresh
-            </SecondaryButton>
-          </div>
-        </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Badge>
+                <FaClock /> Deadlines: {morningDeadline} / {afternoonDeadline}
+              </Badge>
+              <SecondaryButton onClick={fetchMe} disabled={loading} style={{ borderRadius: 999 }}>
+                <FaSyncAlt /> Refresh
+              </SecondaryButton>
+            </div>
+          </HeroPanel>
 
-        <ActionsRow>
-          <PrimaryButton onClick={() => checkIn('morning')} style={{ borderRadius: 999 }}>
-            <FaDoorOpen /> Check In (Morning)
-          </PrimaryButton>
-          <SecondaryButton onClick={() => checkOut('morning')} style={{ borderRadius: 999 }}>
-            <FaDoorClosed /> Check Out (Morning)
-          </SecondaryButton>
-          <PrimaryButton onClick={() => checkIn('afternoon')} style={{ borderRadius: 999 }}>
-            <FaDoorOpen /> Check In (Afternoon)
-          </PrimaryButton>
-          <SecondaryButton onClick={() => checkOut('afternoon')} style={{ borderRadius: 999 }}>
-            <FaDoorClosed /> Check Out (Afternoon)
-          </SecondaryButton>
-        </ActionsRow>
+          <SessionQuickGrid>
+            <SessionQuickCard>
+              <HeroLabel>Morning</HeroLabel>
+              <StatusPill $status={bySession.morning?.status || 'absent'}>
+                {(bySession.morning?.status || 'not recorded').toUpperCase()}
+              </StatusPill>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <StrongButton onClick={() => checkIn('morning')} type="button">
+                  <FaDoorOpen /> Check In
+                </StrongButton>
+                <NeutralButton onClick={() => checkOut('morning')} type="button">
+                  <FaDoorClosed /> Check Out
+                </NeutralButton>
+              </div>
+            </SessionQuickCard>
 
-        <ActionsRow>
-          <PrimaryButton onClick={() => runFaceAttendance('morning')} style={{ borderRadius: 999 }}>
-            <FaUserCheck /> Face Attendance (Morning)
-          </PrimaryButton>
-          <PrimaryButton onClick={() => runFaceAttendance('afternoon')} style={{ borderRadius: 999 }}>
-            <FaUserCheck /> Face Attendance (Afternoon)
-          </PrimaryButton>
+            <SessionQuickCard>
+              <HeroLabel>Afternoon</HeroLabel>
+              <StatusPill $status={bySession.afternoon?.status || 'absent'}>
+                {(bySession.afternoon?.status || 'not recorded').toUpperCase()}
+              </StatusPill>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <StrongButton onClick={() => checkIn('afternoon')} type="button">
+                  <FaDoorOpen /> Check In
+                </StrongButton>
+                <NeutralButton onClick={() => checkOut('afternoon')} type="button">
+                  <FaDoorClosed /> Check Out
+                </NeutralButton>
+              </div>
+            </SessionQuickCard>
+          </SessionQuickGrid>
+        </HeroGrid>
 
-          {faceResultBySession.morning && (
-            <FaceStateBadge $state={faceResultBySession.morning.state}>
-              Morning: {faceResultBySession.morning.message}
-            </FaceStateBadge>
-          )}
-          {faceResultBySession.afternoon && (
-            <FaceStateBadge $state={faceResultBySession.afternoon.state}>
-              Afternoon: {faceResultBySession.afternoon.message}
-            </FaceStateBadge>
-          )}
-        </ActionsRow>
+        <FaceStrip>
+          <div style={{ fontWeight: 950, color: colors.textPrimary }}>Face Attendance Verification</div>
+          <ActionsRow style={{ marginTop: 0 }}>
+            <StrongButton onClick={() => runFaceAttendance('morning')} type="button">
+              <FaUserCheck /> Mark Morning (Face)
+            </StrongButton>
+            <StrongButton onClick={() => runFaceAttendance('afternoon')} type="button">
+              <FaUserCheck /> Mark Afternoon (Face)
+            </StrongButton>
+
+            {faceResultBySession.morning && (
+              <FaceStateBadge $state={faceResultBySession.morning.state}>
+                Morning: {faceResultBySession.morning.message}
+              </FaceStateBadge>
+            )}
+            {faceResultBySession.afternoon && (
+              <FaceStateBadge $state={faceResultBySession.afternoon.state}>
+                Afternoon: {faceResultBySession.afternoon.message}
+              </FaceStateBadge>
+            )}
+          </ActionsRow>
+        </FaceStrip>
       </Hero>
 
       <Section>
@@ -678,7 +812,7 @@ const StaffAttendance = () => {
 
       <Section>
         <SectionTitle>Details</SectionTitle>
-        <div style={{ display: 'grid', gap: 12 }}>
+        <DetailGrid>
           <SessionCard>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 950 }}>Morning</div>
@@ -718,7 +852,7 @@ const StaffAttendance = () => {
               </div>
             </div>
           </SessionCard>
-        </div>
+        </DetailGrid>
       </Section>
 
       {faceFlow.open && (
