@@ -10,6 +10,7 @@ const isSmsEnabled = () => {
 };
 
 const getBaseUrl = () => String(process.env.NEXTSMS_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
+const buildReference = () => `sms-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const buildAuthHeader = () => {
   const user = String(process.env.NEXTSMS_USERNAME || '').trim();
@@ -36,15 +37,17 @@ const normalizePhoneList = (numbers) => uniq((numbers || []).map(normalizeTzPhon
 
 const sendSingleSMS = async ({ to, text, from }) => {
   if (!isSmsEnabled()) return { skipped: true, reason: 'SMS disabled by NEXTSMS_ENABLED' };
-  const toPhone = normalizeTzPhone(to);
+  const toInput = Array.isArray(to) ? to : [to];
+  const toList = normalizePhoneList(toInput);
   const bodyText = String(text || '').trim();
-  if (!toPhone || !bodyText) throw new Error('Valid "to" and "text" are required');
+  if (!toList.length || !bodyText) throw new Error('Valid "to" and "text" are required');
 
   const url = `${getBaseUrl()}/api/sms/v1/text/single`;
   const payload = {
     from: String(from || process.env.NEXTSMS_SENDER_ID || '').trim() || undefined,
-    to: toPhone,
+    to: toList.length === 1 ? toList[0] : toList,
     text: bodyText,
+    reference: buildReference(),
   };
 
   const response = await axios.post(url, payload, {
@@ -73,66 +76,27 @@ const sendMultiSMS = async ({ toList, text, from }) => {
     Accept: 'application/json',
   };
 
-  // Provider payload variants seen in different NextSMS gateways.
-  const payloadMessagesToText = {
-    from: sender,
-    messages: recipients.map((to) => ({ to, text: bodyText })),
-  };
-  const payloadMessagesRecipientMessage = {
-    from: sender,
-    messages: recipients.map((to) => ({ recipient: to, message: bodyText })),
-  };
-  const payloadLegacyToArray = {
-    from: sender,
-    to: recipients,
-    text: bodyText,
+  // Exact payload from official Postman docs:
+  // { "messages":[{"from":"N-SMS","to":"2557...","text":"..."}, ...], "reference":"..." }
+  const payloadDocFormat = {
+    messages: recipients.map((to) => ({ from: sender, to, text: bodyText })),
+    reference: buildReference(),
   };
 
-  const attempts = [
-    { label: 'messages.to+text', payload: payloadMessagesToText },
-    { label: 'messages.recipient+message', payload: payloadMessagesRecipientMessage },
-    { label: 'legacy.to+text', payload: payloadLegacyToArray },
-  ];
-
-  let lastError = null;
-  for (const attempt of attempts) {
+  try {
+    const response = await axios.post(url, payloadDocFormat, {
+      headers: baseHeaders,
+      timeout: 15000,
+    });
+    return response.data;
+  } catch (error) {
+    // Fallback to /text/single with to array, which is also documented for one message to many destinations.
     try {
-      const response = await axios.post(url, attempt.payload, {
-        headers: baseHeaders,
-        timeout: 15000,
-      });
-      return response.data;
-    } catch (error) {
-      lastError = error;
+      return await sendSingleSMS({ to: recipients, text: bodyText, from: sender });
+    } catch (_fallbackError) {
+      throw error;
     }
   }
-
-  // Ultimate compatibility fallback: send one-by-one via the single endpoint.
-  const singleResults = [];
-  for (const to of recipients) {
-    try {
-      const result = await sendSingleSMS({ to, text: bodyText, from: sender });
-      singleResults.push({ to, ok: true, result });
-    } catch (error) {
-      singleResults.push({
-        to,
-        ok: false,
-        error: error?.response?.data || error?.message || 'Unknown error',
-      });
-    }
-  }
-
-  const anySuccess = singleResults.some((x) => x.ok);
-  if (anySuccess) {
-    return {
-      fallback: 'single',
-      success_count: singleResults.filter((x) => x.ok).length,
-      failure_count: singleResults.filter((x) => !x.ok).length,
-      results: singleResults,
-    };
-  }
-
-  throw lastError || new Error('Failed to send SMS via both multi and single endpoints');
 };
 
 module.exports = {
