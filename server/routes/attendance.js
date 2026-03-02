@@ -3,7 +3,6 @@ const { pool } = require('../config/database');
 const PDFDocument = require('pdfkit');
 const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType } = require('docx');
 const Auth = require('../utils/auth');
-const attendanceFaceRoutes = require('./attendance-face');
 const router = express.Router();
 
 const leadershipPositionRegex = /(headmaster|headmistress|head teacher|academic)/i;
@@ -51,19 +50,10 @@ const formatDateForMySQL = (dateValue) => {
   }
 };
 
-const normalizeSession = (sessionValue) => {
-  const value = String(sessionValue || '').trim().toLowerCase();
-  if (value === 'afternoon') return 'afternoon';
-  return 'morning';
-};
-
 // NOTE:
 // Attendance writes must be attributed to the authenticated user (teacher/admin).
 // Some read/debug routes can remain public for troubleshooting, but mutating routes
 // must require auth so `marked_by` is accurate.
-
-// Face-attendance flow mounted under /api/attendance/face
-router.use('/face', attendanceFaceRoutes);
 
 // Test endpoint to check database connection
 router.get('/test', async (req, res) => {
@@ -1100,21 +1090,14 @@ router.post('/:classId/:date', Auth.authenticateToken, async (req, res) => {
                     console.error('❌ Missing required fields in record:', record);
                     throw new Error(`Missing required fields in attendance record: ${JSON.stringify(record)}`);
                 }
-                const session = normalizeSession(record.session);
                 
                 await connection.execute(`
-                    INSERT INTO attendance (student_id, class_id, date, session, status, notes, marked_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE
-                      status = VALUES(status),
-                      notes = VALUES(notes),
-                      marked_by = VALUES(marked_by),
-                      updated_at = CURRENT_TIMESTAMP
+                    INSERT INTO attendance (student_id, class_id, date, status, notes, marked_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 `, [
                     record.student_id,
                     classId,
                     formattedDate,
-                    session,
                     record.status,
                     record.notes || null,
                     teacherId

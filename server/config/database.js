@@ -713,54 +713,6 @@ const testConnection = async () => {
                 UNIQUE KEY unique_student_date_session (student_id, date, session)
             )
         `);
-
-        // Create liveness sessions table for face-attendance workflow
-        await connection.execute(`
-            CREATE TABLE IF NOT EXISTS liveness_sessions (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                session_id CHAR(36) NOT NULL UNIQUE,
-                student_id INT NOT NULL,
-                class_id INT NOT NULL,
-                started_by INT NULL,
-                challenge_type ENUM('blink', 'head_turn', 'smile', 'random') NOT NULL DEFAULT 'random',
-                status ENUM('started', 'completed', 'failed', 'expired') NOT NULL DEFAULT 'started',
-                liveness_passed BOOLEAN NULL,
-                liveness_score DECIMAL(5,4) NULL,
-                face_match_passed BOOLEAN NULL,
-                face_distance DECIMAL(6,4) NULL,
-                confidence DECIMAL(5,4) NULL,
-                failure_reason VARCHAR(255) NULL,
-                request_payload JSON NULL,
-                response_payload JSON NULL,
-                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NULL,
-                completed_at TIMESTAMP NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-                FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
-                FOREIGN KEY (started_by) REFERENCES users(id) ON DELETE SET NULL,
-                INDEX idx_liveness_lookup (student_id, class_id, status, expires_at)
-            )
-        `);
-
-        // Face templates used for identity matching; one active template per student.
-        await connection.execute(`
-            CREATE TABLE IF NOT EXISTS face_templates (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                student_id INT NOT NULL UNIQUE,
-                embedding LONGTEXT NOT NULL,
-                embedding_version VARCHAR(32) NOT NULL DEFAULT 'v1',
-                quality_score DECIMAL(5,4) NULL,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_by INT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-                INDEX idx_face_templates_active (student_id, is_active)
-            )
-        `);
         
         // Create attendance alerts table
         await connection.execute(`

@@ -20,7 +20,6 @@ import {
   Tab,
   TabContainer,
 } from './shared/StyledComponents';
-import LivenessWidget from './LivenessWidget';
 
 const Container = styled(PageContainer)`
   padding: 20px;
@@ -238,47 +237,6 @@ const NotesInput = styled.input`
   }
 `;
 
-const NotesAndFace = styled.div`
-  display: grid;
-  gap: 10px;
-`;
-
-const FaceActionRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-`;
-
-const FaceStatus = styled.span`
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: ${(p) =>
-    p.$state === 'success' ? colors.success : p.$state === 'failed' ? '#ef4444' : colors.textSecondary};
-`;
-
-const FaceModalBackdrop = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  z-index: 1200;
-`;
-
-const FaceModalCard = styled.div`
-  width: 100%;
-  max-width: 580px;
-  background: ${colors.cardBackground};
-  border: 1px solid ${colors.border};
-  border-radius: ${borderRadius.large};
-  padding: 18px;
-  display: grid;
-  gap: 14px;
-`;
-
 const WarningMessage = styled(InfoMessage)`
   background: rgba(245, 158, 11, 0.12);
   border-color: rgba(245, 158, 11, 0.35);
@@ -322,14 +280,6 @@ const AttendanceTracker = () => {
   const [activeSession, setActiveSession] = useState('morning');
   const [attendanceData, setAttendanceData] = useState({});
   const [existingAttendance, setExistingAttendance] = useState({});
-  const [faceStateByStudent, setFaceStateByStudent] = useState({});
-  const [faceFlow, setFaceFlow] = useState({
-    open: false,
-    phase: 'idle',
-    studentId: null,
-    sessionId: '',
-    error: '',
-  });
 
   const isToday = useMemo(() => selectedDate === new Date().toISOString().split('T')[0], [selectedDate]);
   const isAfternoonNow = useMemo(() => new Date().getHours() >= 12, []);
@@ -456,113 +406,6 @@ const AttendanceTracker = () => {
       });
       return next;
     });
-  };
-
-  const resetFaceFlow = () => {
-    setFaceFlow({
-      open: false,
-      phase: 'idle',
-      studentId: null,
-      sessionId: '',
-      error: '',
-    });
-  };
-
-  const startFaceAttendance = async (studentId) => {
-    if (!studentId) return;
-    const currentStatus = attendanceData[studentId]?.status || 'present';
-    try {
-      setFaceFlow({
-        open: true,
-        phase: 'starting',
-        studentId,
-        sessionId: '',
-        error: '',
-      });
-
-      const response = await api.post('/api/attendance/face/start', {
-        studentId: Number(studentId),
-        classId: Number(classId),
-        session: activeSession,
-      });
-
-      const sessionId = response?.data?.data?.livenessSessionId;
-      if (!sessionId) {
-        throw new Error('No liveness session returned');
-      }
-
-      setFaceFlow({
-        open: true,
-        phase: 'in_progress',
-        studentId,
-        sessionId,
-        error: '',
-      });
-
-      setFaceStateByStudent((prev) => ({
-        ...prev,
-        [studentId]: { state: 'pending', message: `Awaiting liveness (${currentStatus})` },
-      }));
-    } catch (error) {
-      const message = error.response?.data?.error?.message || error.response?.data?.message || 'Failed to start face attendance';
-      setFaceFlow({
-        open: true,
-        phase: 'failed',
-        studentId,
-        sessionId: '',
-        error: message,
-      });
-      setFaceStateByStudent((prev) => ({
-        ...prev,
-        [studentId]: { state: 'failed', message },
-      }));
-      toast.error(message);
-    }
-  };
-
-  const completeFaceAttendance = async () => {
-    if (!faceFlow.studentId || !faceFlow.sessionId) return;
-
-    const studentId = Number(faceFlow.studentId);
-    const status = attendanceData[studentId]?.status || 'present';
-    const notes = attendanceData[studentId]?.notes || '';
-
-    try {
-      setFaceFlow((prev) => ({ ...prev, phase: 'completing', error: '' }));
-
-      const response = await api.post('/api/attendance/face/complete', {
-        livenessSessionId: faceFlow.sessionId,
-        studentId,
-        classId: Number(classId),
-        date: selectedDate,
-        session: activeSession,
-        status,
-        notes,
-      });
-
-      if (!response?.data?.success) {
-        throw new Error('Face attendance completion failed');
-      }
-
-      setFaceStateByStudent((prev) => ({
-        ...prev,
-        [studentId]: { state: 'success', message: 'Face attendance marked' },
-      }));
-      setFaceFlow((prev) => ({ ...prev, phase: 'success', error: '' }));
-      toast.success('Face attendance marked successfully');
-      resetFaceFlow();
-    } catch (error) {
-      const message =
-        error.response?.data?.error?.message ||
-        error.response?.data?.message ||
-        'Face verification failed. Please retry.';
-      setFaceFlow((prev) => ({ ...prev, phase: 'failed', error: message }));
-      setFaceStateByStudent((prev) => ({
-        ...prev,
-        [studentId]: { state: 'failed', message },
-      }));
-      toast.error(message);
-    }
   };
 
   const saveAttendance = async () => {
@@ -823,29 +666,12 @@ const AttendanceTracker = () => {
                   ))}
                 </StatusButtons>
 
-                <NotesAndFace>
-                  <NotesInput
-                    placeholder="Add notes (optional)…"
-                    value={attendanceData[student.id]?.notes || ''}
-                    onChange={(e) => isEditable && handleNotesChange(student.id, e.target.value)}
-                    disabled={!isEditable}
-                  />
-                  <FaceActionRow>
-                    <SecondaryButton
-                      type="button"
-                      onClick={() => startFaceAttendance(student.id)}
-                      disabled={!isEditable || faceFlow.phase === 'starting' || faceFlow.phase === 'completing'}
-                      title="Start liveness flow and mark attendance through backend verification"
-                    >
-                      Mark Attendance (Face)
-                    </SecondaryButton>
-                    {faceStateByStudent[student.id] && (
-                      <FaceStatus $state={faceStateByStudent[student.id].state}>
-                        {faceStateByStudent[student.id].message}
-                      </FaceStatus>
-                    )}
-                  </FaceActionRow>
-                </NotesAndFace>
+                <NotesInput
+                  placeholder="Add notes (optional)…"
+                  value={attendanceData[student.id]?.notes || ''}
+                  onChange={(e) => isEditable && handleNotesChange(student.id, e.target.value)}
+                  disabled={!isEditable}
+                />
               </StudentRow>
             );
           })}
@@ -869,49 +695,6 @@ const AttendanceTracker = () => {
           </div>
         )}
       </Section>
-
-      {faceFlow.open && (
-        <FaceModalBackdrop>
-          <FaceModalCard>
-            <div>
-              <h3 style={{ margin: 0 }}>Mark Attendance (Face)</h3>
-              <div style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
-                Step 1: Start liveness session. Step 2: Complete liveness. Step 3: Server marks attendance.
-              </div>
-            </div>
-
-            {faceFlow.phase === 'starting' && (
-              <div style={{ color: colors.textSecondary }}>Creating liveness session...</div>
-            )}
-
-            {(faceFlow.phase === 'in_progress' || faceFlow.phase === 'completing') && (
-              <LivenessWidget
-                sessionId={faceFlow.sessionId}
-                onComplete={completeFaceAttendance}
-                onCancel={resetFaceFlow}
-                loading={faceFlow.phase === 'completing'}
-              />
-            )}
-
-            {faceFlow.phase === 'failed' && (
-              <>
-                <WarningMessage>
-                  <i className="fas fa-exclamation-triangle"></i>
-                  <div>{faceFlow.error || 'Face verification failed.'}</div>
-                </WarningMessage>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <PrimaryButton type="button" onClick={() => startFaceAttendance(faceFlow.studentId)}>
-                    Retry
-                  </PrimaryButton>
-                  <SecondaryButton type="button" onClick={resetFaceFlow}>
-                    Close
-                  </SecondaryButton>
-                </div>
-              </>
-            )}
-          </FaceModalCard>
-        </FaceModalBackdrop>
-      )}
     </Container>
   );
 };
