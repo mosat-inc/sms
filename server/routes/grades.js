@@ -5,6 +5,7 @@ const Auth = require('../utils/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { asyncHandler, NotFoundError, AuthorizationError } = require('../middleware/errorHandler');
 const { calculateLetterGrade, updateGradeAnalytics } = require('../config/grades-schema');
+const { createParentNotificationForStudent } = require('../services/notificationsService');
 
 // ==================== ASSESSMENTS ENDPOINTS ====================
 
@@ -280,6 +281,44 @@ router.post('/grades/record',
                     assessment_id, assessment.subject_id, assessment.class_id,
                     assessment.teacher_id, assessment.term, assessment.academic_year
                 );
+
+                // Best-effort parent notifications (SMS/email/in-app via notifications service)
+                setImmediate(async () => {
+                    try {
+                        const uniqueStudentIds = [...new Set(
+                            (grades || [])
+                                .map((g) => Number(g.student_id))
+                                .filter((id) => Number.isFinite(id))
+                        )];
+
+                        for (const studentId of uniqueStudentIds) {
+                            const studentGrade = grades.find((g) => Number(g.student_id) === studentId) || {};
+                            const marksText =
+                                studentGrade.is_absent || studentGrade.is_excused || studentGrade.marks_obtained === null || studentGrade.marks_obtained === undefined
+                                    ? 'status updated'
+                                    : `marks ${studentGrade.marks_obtained}/${assessment.total_marks}`;
+
+                            await createParentNotificationForStudent({
+                                studentId,
+                                type: 'results',
+                                priority: 'medium',
+                                title: 'Assessment Results Updated',
+                                message: `${assessment.subject_name} - ${assessment.title}: ${marksText}.`,
+                                data: {
+                                    assessment_id,
+                                    subject_id: assessment.subject_id,
+                                    class_id: assessment.class_id,
+                                    subject_name: assessment.subject_name,
+                                    assessment_title: assessment.title,
+                                    term: assessment.term,
+                                    academic_year: assessment.academic_year,
+                                },
+                            });
+                        }
+                    } catch (_notifyErr) {
+                        // Never block grades response on background notifications
+                    }
+                });
                 
                 res.json({
                     success: true,

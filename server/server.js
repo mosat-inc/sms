@@ -38,6 +38,7 @@ const healthRoutes = require('./routes/health');
 const staffAttendanceRoutes = require('./routes/staff-attendance');
 const disciplineRoutes = require('./routes/discipline');
 const notificationsRoutes = require('./routes/notifications');
+const smsRoutes = require('./routes/sms');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -184,6 +185,7 @@ app.use('/api/parent', parentRoutes);
 app.use('/api/staff-attendance', staffAttendanceRoutes);
 app.use('/api/discipline', disciplineRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/sms', smsRoutes);
 app.use('/health', healthRoutes);
 
 // Serve static React build files in production

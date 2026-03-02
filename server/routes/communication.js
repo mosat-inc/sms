@@ -5,6 +5,7 @@ const Auth = require('../utils/auth');
 const { authenticateToken } = Auth;
 const cache = require('../utils/cache');
 const { sendEmail } = require('../services/emailService');
+const { sendMultiSMS, normalizeTzPhone } = require('../services/nextSmsService');
 
 const uniq = (arr) => [...new Set((arr || []).map((v) => String(v || '').trim()).filter(Boolean))];
 
@@ -45,6 +46,70 @@ const getParentEmailsForAnnouncement = async ({ targetAudience, classId }) => {
   );
 
   return uniq((rows || []).map((r) => r.email).filter(isValidEmail));
+};
+
+const getSmsPhonesForAnnouncement = async ({ targetAudience, classId }) => {
+  const audience = String(targetAudience || 'all');
+  const eligible = new Set(['all', 'parents', 'students', 'teachers', 'specific_class']);
+  if (!eligible.has(audience)) return [];
+
+  const phones = [];
+  const normalizedPush = (value) => {
+    const p = normalizeTzPhone(value);
+    if (p) phones.push(p);
+  };
+
+  if (audience === 'parents' || audience === 'all' || audience === 'specific_class') {
+    const params = [];
+    let where = `s.status = 'active' AND ss.is_primary_supervisor = TRUE`;
+    if (audience === 'specific_class') {
+      where += ' AND s.class_id = ?';
+      params.push(classId || null);
+    }
+    const [rows] = await pool.execute(
+      `
+        SELECT DISTINCT sup.phone
+        FROM students s
+        INNER JOIN student_supervisors ss ON ss.student_id = s.id
+        INNER JOIN supervisors sup ON sup.id = ss.supervisor_id
+        WHERE ${where}
+      `,
+      params
+    );
+    for (const row of rows || []) normalizedPush(row.phone);
+  }
+
+  if (audience === 'students' || audience === 'all' || audience === 'specific_class') {
+    const params = [];
+    let where = `s.status = 'active' AND u.phone IS NOT NULL AND TRIM(u.phone) <> ''`;
+    if (audience === 'specific_class') {
+      where += ' AND s.class_id = ?';
+      params.push(classId || null);
+    }
+    const [rows] = await pool.execute(
+      `
+        SELECT DISTINCT u.phone
+        FROM students s
+        INNER JOIN users u ON u.id = s.user_id
+        WHERE ${where}
+      `,
+      params
+    );
+    for (const row of rows || []) normalizedPush(row.phone);
+  }
+
+  if (audience === 'teachers' || audience === 'all') {
+    const [rows] = await pool.execute(
+      `
+        SELECT DISTINCT phone
+        FROM users
+        WHERE role = 'teacher' AND is_active = 1 AND phone IS NOT NULL AND TRIM(phone) <> ''
+      `
+    );
+    for (const row of rows || []) normalizedPush(row.phone);
+  }
+
+  return uniq(phones);
 };
 
 // Helper function to execute queries
@@ -335,6 +400,24 @@ router.post('/announcements', authenticateToken, async (req, res) => {
         }
       } catch (_e) {
         // Ignore email failures
+      }
+    });
+
+    // Best-effort SMS broadcast for announcement audience.
+    setImmediate(async () => {
+      try {
+        const schoolName = (process.env.SCHOOL_NAME || 'UBUNIFU SEC').trim();
+        const smsText = `${schoolName}: ${title} - ${content}`.replace(/\s+/g, ' ').trim().slice(0, 620);
+        const phones = await getSmsPhonesForAnnouncement({
+          targetAudience: target_audience,
+          classId: target_audience === 'specific_class' ? class_id : null,
+        });
+        if (!phones.length) return;
+        for (const batch of chunk(phones, 100)) {
+          await sendMultiSMS({ toList: batch, text: smsText });
+        }
+      } catch (_smsErr) {
+        // Ignore sms failures
       }
     });
     

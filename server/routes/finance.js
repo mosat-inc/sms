@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/database');
 const Auth = require('../utils/auth');
 const { authenticateToken } = Auth;
+const { createParentNotificationForStudent } = require('../services/notificationsService');
 
 const getCurrentAcademicYear = async () => {
   try {
@@ -170,6 +171,27 @@ router.post('/record-payment', authenticateToken, async (req, res) => {
       req.user.id,
       new Date(payment_date).getFullYear() // Extract academic_year from payment_date
     ]);
+
+    setImmediate(async () => {
+      try {
+        await createParentNotificationForStudent({
+          studentId: student_id,
+          type: 'finance',
+          priority: 'medium',
+          title: 'Fee Payment Recorded',
+          message: `Fee payment of TZS ${Number(amount).toLocaleString()} was recorded on ${payment_date} (term: ${term}, status: ${status || 'Paid'}).`,
+          data: {
+            amount: Number(amount),
+            term,
+            payment_date,
+            status: status || 'Paid',
+            source: 'finance.record-payment',
+          },
+        });
+      } catch (_e) {
+        // Do not block payment flow
+      }
+    });
     
     res.json({
       success: true,
@@ -437,6 +459,27 @@ router.post('/contributions/record-payment', authenticateToken, async (req, res)
       ]
     );
 
+    setImmediate(async () => {
+      try {
+        await createParentNotificationForStudent({
+          studentId: student_id,
+          type: 'finance',
+          priority: 'medium',
+          title: 'Contribution Payment Recorded',
+          message: `Contribution payment (${category}) of TZS ${Number(amount).toLocaleString()} was recorded on ${payment_date}.`,
+          data: {
+            category: String(category),
+            amount: Number(amount),
+            payment_date,
+            status: status || 'Paid',
+            source: 'finance.contributions.record-payment',
+          },
+        });
+      } catch (_e) {
+        // Do not block contribution flow
+      }
+    });
+
     return res.json({ success: true, message: 'Contribution recorded successfully' });
   } catch (error) {
     console.error('Error recording contribution:', error);
@@ -573,6 +616,26 @@ router.post('/pocket-money/record', authenticateToken, async (req, res) => {
         req.user.id,
       ]
     );
+
+    setImmediate(async () => {
+      try {
+        await createParentNotificationForStudent({
+          studentId: student_id,
+          type: 'finance',
+          priority: 'medium',
+          title: 'Pocket Money Transaction',
+          message: `Pocket money ${String(txn_type)} of TZS ${Number(amount).toLocaleString()} was recorded on ${txn_date}.`,
+          data: {
+            txn_type: String(txn_type),
+            amount: Number(amount),
+            txn_date,
+            source: 'finance.pocket-money.record',
+          },
+        });
+      } catch (_e) {
+        // Do not block pocket money flow
+      }
+    });
 
     return res.json({ success: true, message: 'Pocket money transaction recorded successfully' });
   } catch (error) {

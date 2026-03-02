@@ -22,6 +22,7 @@ type ApiErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'RATE_LIMITED'
+  | 'SERVICE_UNAVAILABLE'
   | 'UNPROCESSABLE_ENTITY'
   | 'INTERNAL_ERROR';
 
@@ -39,6 +40,7 @@ const requiredPassingFrames = Number(process.env.FACE_ATTENDANCE_REQUIRED_FRAMES
 const totalFramesExpected = Number(process.env.FACE_ATTENDANCE_TOTAL_FRAMES || 5);
 const rateLimitAttempts = Number(process.env.FACE_ATTENDANCE_MAX_ATTEMPTS_10M || 5);
 const sessionExpirySeconds = 120;
+const REQUIRED_FACE_TABLES = ['face_sessions', 'face_templates', 'attendance_attempts', 'attendance_events'] as const;
 
 const startSchema = z.object({
   userId: z.coerce.number().int().positive(),
@@ -129,6 +131,29 @@ function normalizeTemplateVectors(raw: unknown): number[][] {
   return [single];
 }
 
+async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
+  const [rows] = await conn.execute<RowDataPacket[]>(
+    `SELECT table_name
+     FROM information_schema.tables
+     WHERE table_schema = DATABASE()
+       AND table_name IN (${REQUIRED_FACE_TABLES.map(() => '?').join(',')})`,
+    [...REQUIRED_FACE_TABLES]
+  );
+
+  const found = new Set(rows.map((row) => String(row.table_name)));
+  const missing = REQUIRED_FACE_TABLES.filter((name) => !found.has(name));
+  if (missing.length) {
+    const error = new Error(`Face attendance tables are missing: ${missing.join(', ')}`);
+    (error as any).apiCode = 'SERVICE_UNAVAILABLE';
+    (error as any).status = 503;
+    (error as any).details = {
+      missingTables: missing,
+      fix: 'Run: npm run migrate',
+    };
+    throw error;
+  }
+}
+
 async function resolveOrgId(conn: PoolConnection, req: AuthenticatedRequest): Promise<number> {
   if (req.user?.schoolId && Number(req.user.schoolId) > 0) return Number(req.user.schoolId);
 
@@ -180,6 +205,8 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
+    await ensureFaceAttendanceSchema(conn);
+
     const orgId = await resolveOrgId(conn, req);
 
     await guardRateLimit(conn, userId, orgId);
@@ -230,9 +257,14 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
     if (error?.apiCode === 'RATE_LIMITED') {
       return sendError(res, 429, 'RATE_LIMITED', error.message);
     }
+    if (error?.apiCode === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', error.message, error?.details);
+    }
 
     console.error('Face attendance start error:', error);
-    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to start face attendance session');
+    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to start face attendance session', {
+      reason: error?.message || 'Unknown error',
+    });
   } finally {
     conn?.release();
   }
@@ -254,6 +286,8 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
+
+    await ensureFaceAttendanceSchema(conn);
 
     const orgId = await resolveOrgId(conn, req);
 
@@ -431,9 +465,14 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
     if (error?.apiCode === 'RATE_LIMITED') {
       return sendError(res, 429, 'RATE_LIMITED', error.message);
     }
+    if (error?.apiCode === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', error.message, error?.details);
+    }
 
     console.error('Face attendance complete error:', error);
-    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to complete face attendance');
+    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to complete face attendance', {
+      reason: error?.message || 'Unknown error',
+    });
   } finally {
     conn?.release();
   }

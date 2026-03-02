@@ -9,6 +9,18 @@ const isValidEmail = (email) => {
 
 const uniq = (arr) => [...new Set((arr || []).map((v) => String(v || '').trim()).filter(Boolean))];
 
+const normalizePhone = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+
+  if (/^255[67]\d{8}$/.test(digits)) return digits;
+  if (/^0[67]\d{8}$/.test(digits)) return `255${digits.slice(1)}`;
+  if (/^[67]\d{8}$/.test(digits)) return `255${digits}`;
+  return null;
+};
+
 const getParentEmailsForStudent = async (studentId) => {
   const id = Number(studentId);
   if (!Number.isFinite(id)) return [];
@@ -93,8 +105,85 @@ const getParentEmailsForClass = async (classId) => {
   return getParentEmailsForStudents(studentIds);
 };
 
+const getParentPhonesForStudent = async (studentId) => {
+  const id = Number(studentId);
+  if (!Number.isFinite(id)) return [];
+
+  const [rows] = await pool.execute(
+    `
+      SELECT sup.phone, ss.is_primary_supervisor
+      FROM student_supervisors ss
+      INNER JOIN supervisors sup ON sup.id = ss.supervisor_id
+      WHERE ss.student_id = ?
+        AND sup.phone IS NOT NULL
+        AND TRIM(sup.phone) <> ''
+      ORDER BY ss.is_primary_supervisor DESC, sup.is_primary_contact DESC, ss.created_at ASC, sup.id ASC
+    `,
+    [id]
+  );
+
+  const valid = (rows || [])
+    .map((r) => ({
+      phone: normalizePhone(r.phone),
+      is_primary_supervisor: r.is_primary_supervisor === 1 || r.is_primary_supervisor === true,
+    }))
+    .filter((r) => !!r.phone);
+
+  const primary = valid.filter((r) => r.is_primary_supervisor);
+  const chosen = primary.length ? primary : valid;
+  return uniq(chosen.map((r) => r.phone));
+};
+
+const getParentPhonesForStudents = async (studentIds) => {
+  const ids = uniq(studentIds)
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n));
+
+  const result = new Map();
+  if (!ids.length) return result;
+
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await pool.execute(
+    `
+      SELECT ss.student_id, sup.phone, ss.is_primary_supervisor
+      FROM student_supervisors ss
+      INNER JOIN supervisors sup ON sup.id = ss.supervisor_id
+      WHERE ss.student_id IN (${placeholders})
+        AND sup.phone IS NOT NULL
+        AND TRIM(sup.phone) <> ''
+      ORDER BY ss.student_id ASC, ss.is_primary_supervisor DESC, sup.is_primary_contact DESC, ss.created_at ASC, sup.id ASC
+    `,
+    ids
+  );
+
+  const grouped = new Map();
+  for (const r of rows || []) {
+    const sid = Number(r.student_id);
+    if (!Number.isFinite(sid)) continue;
+    if (!grouped.has(sid)) grouped.set(sid, []);
+    grouped.get(sid).push(r);
+  }
+
+  for (const [sid, recs] of grouped.entries()) {
+    const valid = recs
+      .map((r) => ({
+        phone: normalizePhone(r.phone),
+        is_primary_supervisor: r.is_primary_supervisor === 1 || r.is_primary_supervisor === true,
+      }))
+      .filter((r) => !!r.phone);
+
+    const primary = valid.filter((r) => r.is_primary_supervisor);
+    const chosen = primary.length ? primary : valid;
+    result.set(sid, uniq(chosen.map((r) => r.phone)));
+  }
+
+  return result;
+};
+
 module.exports = {
   getParentEmailsForStudent,
   getParentEmailsForStudents,
   getParentEmailsForClass,
+  getParentPhonesForStudent,
+  getParentPhonesForStudents,
 };

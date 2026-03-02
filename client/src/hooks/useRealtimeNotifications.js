@@ -4,17 +4,13 @@ import { useAuth } from '../contexts/AuthContext';
 // Cache for reducing duplicate requests
 const cache = new Map();
 const CACHE_TTL = 30000; // 30 seconds cache
+const DEBUG_NOTIFICATIONS = process.env.REACT_APP_DEBUG_NOTIFICATIONS === 'true';
 
 const useRealtimeNotifications = () => {
   const { api } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  
-  // Debug loading state changes
-  useEffect(() => {
-    console.log(`Loading state changed to: ${loading}`);
-  }, [loading]);
   const [error, setError] = useState(null);
   const [lastFetch, setLastFetch] = useState(null);
   const [rateLimitedUntil, setRateLimitedUntil] = useState(null);
@@ -25,7 +21,12 @@ const useRealtimeNotifications = () => {
   const loadingTimeoutRef = useRef(null);
   const isActiveRef = useRef(true);
   const requestInProgressRef = useRef(false);
+  const loadingRef = useRef(false);
   const [pollInterval, setPollInterval] = useState(30000); // Start with 30 seconds
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
 
   // Cache helper functions
   const getCacheKey = useCallback((params) => {
@@ -69,7 +70,9 @@ const useRealtimeNotifications = () => {
     }
     
     if (newInterval !== pollInterval) {
-      console.log(`Updating poll interval from ${pollInterval}ms to ${newInterval}ms (errors: ${consecutiveErrors})`);
+      if (DEBUG_NOTIFICATIONS) {
+        console.log(`Updating poll interval from ${pollInterval}ms to ${newInterval}ms (errors: ${consecutiveErrors})`);
+      }
       setPollInterval(newInterval);
     }
   }, [lastFetch, rateLimitedUntil, pollInterval, consecutiveErrors]);
@@ -88,19 +91,19 @@ const useRealtimeNotifications = () => {
   const fetchNotificationsImmediate = useCallback(async (force = false) => {
     // Prevent multiple simultaneous requests
     if (requestInProgressRef.current && !force) {
-      console.log('Request already in progress, skipping...');
+      if (DEBUG_NOTIFICATIONS) console.log('Request already in progress, skipping...');
       return;
     }
     
     // Don't prevent requests if currently loading unless it's a recent request
     if (loading && !force && lastFetch && (Date.now() - lastFetch < 5000)) {
-      console.log('Recent request still loading, skipping...');
+      if (DEBUG_NOTIFICATIONS) console.log('Recent request still loading, skipping...');
       return;
     }
     
     // Check if we're still rate limited
     if (rateLimitedUntil && Date.now() < rateLimitedUntil && !force) {
-      console.log('Still rate limited, skipping fetch');
+      if (DEBUG_NOTIFICATIONS) console.log('Still rate limited, skipping fetch');
       return;
     }
     
@@ -134,7 +137,7 @@ const useRealtimeNotifications = () => {
       if (!force) {
         const cachedData = getCachedData(cacheKey);
         if (cachedData) {
-          console.log('Using cached notification data');
+          if (DEBUG_NOTIFICATIONS) console.log('Using cached notification data');
           setNotifications(cachedData.notifications || []);
           setUnreadCount(cachedData.unreadCount || 0);
           setConsecutiveErrors(0); // Reset error count on successful cache hit
@@ -261,13 +264,13 @@ const useRealtimeNotifications = () => {
     }
     
     if (isActiveRef.current && pollInterval > 0) {
-      console.log(`Setting up notification polling with ${pollInterval}ms interval`);
+      if (DEBUG_NOTIFICATIONS) {
+        console.log(`Setting up notification polling with ${pollInterval}ms interval`);
+      }
       pollIntervalRef.current = setInterval(() => {
-        if (isActiveRef.current && !requestInProgressRef.current && !loading) {
-          console.log('Polling for notifications...');
+        if (isActiveRef.current && !requestInProgressRef.current && !loadingRef.current) {
+          if (DEBUG_NOTIFICATIONS) console.log('Polling for notifications...');
           fetchNotifications();
-        } else {
-          console.log('Skipping poll - request in progress or loading');
         }
       }, pollInterval);
     }
@@ -283,7 +286,7 @@ const useRealtimeNotifications = () => {
         clearTimeout(loadingTimeoutRef.current);
       }
     };
-  }, [pollInterval, fetchNotifications, loading]);
+  }, [pollInterval, fetchNotifications]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -345,7 +348,7 @@ const useRealtimeNotifications = () => {
 
   // Emergency reset function to clear stuck loading states
   const resetLoadingState = useCallback(() => {
-    console.log('Emergency loading state reset triggered');
+    if (DEBUG_NOTIFICATIONS) console.log('Emergency loading state reset triggered');
     setLoading(false);
     requestInProgressRef.current = false;
     setError(null);

@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { sendEmail } = require('./emailService');
-const { getParentEmailsForStudent } = require('./parentContactService');
+const { sendMultiSMS } = require('./nextSmsService');
+const { getParentEmailsForStudent, getParentPhonesForStudent } = require('./parentContactService');
 
 const escapeHtml = (value) =>
   String(value ?? '')
@@ -214,6 +215,17 @@ const buildNotificationEmail = ({ student, title, message, priority, type, data 
   return { subject, html, text };
 };
 
+const buildNotificationSmsText = ({ student, title, message }) => {
+  const schoolName = (process.env.SCHOOL_NAME || 'UBUNIFU SEC').trim();
+  const studentName = student?.student_name ? `${student.student_name}` : 'Student';
+  const lines = [
+    `${schoolName}: ${title}`,
+    `${studentName}`,
+    String(message || '').trim(),
+  ].filter(Boolean);
+  return lines.join(' - ').slice(0, 620);
+};
+
 const createUserNotification = async ({
   userId,
   studentId,
@@ -235,13 +247,30 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
   if (!studentId) return;
   await createUserNotification({ studentId, ...rest });
 
-  // Best-effort email: do not block main request/response.
+  // Best-effort parent channels: do not block main request/response.
   setImmediate(async () => {
     try {
+      const student = await getStudentContext(studentId);
+
+      try {
+        const phones = await getParentPhonesForStudent(studentId);
+        if (phones.length) {
+          await sendMultiSMS({
+            toList: phones,
+            text: buildNotificationSmsText({
+              student,
+              title: rest.title,
+              message: rest.message,
+            }),
+          });
+        }
+      } catch (_smsErr) {
+        // Ignore SMS failures in background notification path
+      }
+
       const emails = await getParentEmailsForStudent(studentId);
       if (!emails.length) return;
 
-      const student = await getStudentContext(studentId);
       const emailContent = buildNotificationEmail({
         student,
         type: rest.type,
