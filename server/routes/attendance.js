@@ -3,6 +3,7 @@ const { pool } = require('../config/database');
 const PDFDocument = require('pdfkit');
 const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType } = require('docx');
 const Auth = require('../utils/auth');
+const { createParentNotificationForStudent } = require('../services/notificationsService');
 const attendanceFaceRoutes = require('./attendance-face');
 const router = express.Router();
 
@@ -1111,6 +1112,36 @@ router.post('/:classId/:date', Auth.authenticateToken, async (req, res) => {
 
             await connection.commit();
             console.log('✅ Transaction committed. Inserted', insertedCount, 'records');
+
+            // Best-effort parent notifications for absences from this attendance endpoint.
+            setImmediate(async () => {
+                try {
+                    const absentStudentIds = [...new Set(
+                        (attendance || [])
+                            .filter((r) => String(r?.status || '').toLowerCase() === 'absent')
+                            .map((r) => Number(r.student_id))
+                            .filter((id) => Number.isFinite(id))
+                    )];
+
+                    for (const studentId of absentStudentIds) {
+                        await createParentNotificationForStudent({
+                            studentId,
+                            type: 'attendance',
+                            priority: 'high',
+                            title: 'Attendance Absent',
+                            message: `Student was marked absent on ${formattedDate}.`,
+                            data: {
+                                class_id: Number(classId),
+                                date: formattedDate,
+                                status: 'absent',
+                                source: 'attendance.class-daily',
+                            },
+                        });
+                    }
+                } catch (notifyErr) {
+                    console.warn('Attendance absence notifications skipped:', notifyErr.message);
+                }
+            });
             
             res.json({ 
                 success: true, 
