@@ -1,203 +1,288 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { toast } from 'react-toastify';
-import { FaClock, FaDoorOpen, FaDoorClosed, FaSyncAlt, FaUserCheck } from 'react-icons/fa';
+import { FaCalendarAlt, FaChevronDown, FaFingerprint, FaRegCalendarAlt, FaSearch, FaSyncAlt, FaUserTimes } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { mediaQuery } from '../hooks/useDevice';
 import {
   Card,
   PageContainer,
-  PageHeader,
-  PrimaryButton,
   SecondaryButton,
-  Section,
-  SectionTitle,
-  StatsGrid,
-  StatCard,
   colors,
   borderRadius,
-  shadows,
 } from './shared/StyledComponents';
 
 const Wrapper = styled(PageContainer)`
-  padding: 20px;
+  padding: 24px;
+  background: radial-gradient(circle at 15% 20%, rgba(167, 191, 255, 0.28), rgba(243, 246, 255, 0.92) 42%),
+    linear-gradient(135deg, #ebefff, #f6f8ff);
+  min-height: calc(100vh - 72px);
   ${mediaQuery('tablet')} {
     padding: 16px;
   }
   ${mediaQuery('mobile')} {
-    padding: 12px;
+    padding: 14px;
   }
 `;
 
-const Hero = styled(Card)`
-  padding: 18px;
-  border-radius: ${borderRadius.large};
-  border: 1px solid rgba(99, 102, 241, 0.22);
-  background: linear-gradient(135deg, rgba(30, 58, 138, 0.12), rgba(99, 102, 241, 0.1), rgba(255, 255, 255, 0.88));
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  &::after {
-    content: '';
-    position: absolute;
-    inset: auto -80px -120px auto;
-    width: 280px;
-    height: 280px;
-    border-radius: 999px;
-    background: radial-gradient(circle, rgba(14, 165, 233, 0.3), rgba(14, 165, 233, 0));
-    z-index: -1;
-  }
-`;
-
-const ActionsRow = styled.div`
+const TopBar = styled.div`
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  ${mediaQuery('mobile')} {
+    flex-direction: column;
+  }
+`;
+
+const TitleWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+const PageTitle = styled.h1`
+  margin: 0;
+  color: #2f3f74;
+  font-size: clamp(30px, 4.2vw, 44px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+`;
+
+const SubTitle = styled.p`
+  margin: 0;
+  color: #506093;
+  font-size: 31px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  ${mediaQuery('mobile')} {
+    font-size: 20px;
+  }
+`;
+
+const SearchBar = styled.label`
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 290px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(119, 138, 187, 0.2);
+  padding: 10px 14px;
+  color: #6474a7;
+  box-shadow: 0 10px 26px rgba(75, 94, 155, 0.12);
+  ${mediaQuery('mobile')} {
+    width: 100%;
+    min-width: 0;
+  }
+`;
+
+const SearchInput = styled.input`
+  border: none;
+  background: transparent;
+  outline: none;
+  width: 100%;
+  color: #455684;
+  font-size: 20px;
+  font-weight: 500;
+  &::placeholder {
+    color: #7d8eb7;
+  }
+`;
+
+const SummaryRow = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 14px;
+  margin-bottom: 16px;
+  ${mediaQuery('mobile')} {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const SummaryCard = styled(Card)`
+  background: rgba(255, 255, 255, 0.67);
+  border: 1px solid rgba(130, 147, 195, 0.24);
+  border-radius: 24px;
+  padding: 18px 20px;
+  box-shadow: 0 16px 30px rgba(84, 103, 156, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const SummaryMeta = styled.div`
+  display: grid;
+  gap: 8px;
+`;
+
+const SummaryLabel = styled.div`
+  color: #415588;
+  font-weight: 700;
+  font-size: 20px;
+`;
+
+const SummaryValue = styled.div`
+  color: #2c3d71;
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 800;
+`;
+
+const SummarySub = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #516292;
+  font-size: 29px;
+`;
+
+const StatusText = styled.div`
+  color: ${(p) => (p.$status === 'absent' ? '#d86176' : '#3c9d67')};
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 800;
+`;
+
+const StatusPercent = styled.div`
+  color: #7d8eb7;
+  font-size: 31px;
+`;
+
+const StatusIconWrap = styled.div`
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: rgba(235, 215, 229, 0.6);
+  display: grid;
+  place-items: center;
+  color: #d86176;
+  font-size: 36px;
+`;
+
+const RecordsCard = styled(Card)`
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(132, 150, 194, 0.26);
+  border-radius: 28px;
+  padding: 18px;
+  box-shadow: 0 18px 36px rgba(96, 113, 168, 0.15);
+  display: grid;
+  gap: 14px;
+`;
+
+const RecordsHeader = styled.div`
+  display: grid;
+  gap: 10px;
+`;
+
+const RecordsTitle = styled.h2`
+  margin: 0;
+  color: #2f4275;
+  font-size: 20px;
+  font-weight: 800;
+`;
+
+const FilterPill = styled.button`
+  border: 1px solid rgba(121, 140, 191, 0.24);
+  background: rgba(236, 241, 255, 0.85);
+  color: #3f5388;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  width: fit-content;
+  min-width: 230px;
+  font-size: 22px;
+  font-weight: 600;
+`;
+
+const TableWrap = styled.div`
+  overflow-x: auto;
+`;
+
+const RecordsTable = styled.table`
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: #33477d;
+  min-width: 760px;
+  th {
+    text-align: left;
+    padding: 12px 14px;
+    background: rgba(232, 237, 255, 0.95);
+    font-size: 18px;
+    color: #405488;
+    font-weight: 700;
+    border-bottom: 1px solid rgba(178, 192, 229, 0.28);
+  }
+  th:first-child {
+    border-top-left-radius: 12px;
+  }
+  th:last-child {
+    border-top-right-radius: 12px;
+  }
+  td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(177, 191, 227, 0.3);
+    font-size: 18px;
+    color: #3b4f82;
+  }
+`;
+
+const NameCell = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const Avatar = styled.span`
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #8cb4ff, #6278c7);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+`;
+
+const StatusTag = styled.span`
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  background: ${(p) => (p.$status === 'present' ? 'rgba(82, 177, 124, 0.22)' : 'rgba(216, 97, 118, 0.18)')};
+  color: ${(p) => (p.$status === 'present' ? '#2f8257' : '#c2556d')};
+`;
+
+const TableFooter = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  align-items: center;
-  margin-top: 12px;
+  color: #6173a5;
+  font-size: 18px;
 `;
 
-const Badge = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-weight: 950;
-  font-size: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.9);
-`;
-
-const StatusPill = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  border-radius: 999px;
-  font-weight: 950;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: ${(p) =>
-    p.$status === 'present'
-      ? 'rgba(34, 197, 94, 0.14)'
-      : p.$status === 'late'
-        ? 'rgba(250, 204, 21, 0.18)'
-        : 'rgba(239, 68, 68, 0.14)'};
-  color: ${colors.textPrimary};
-`;
-
-const SessionCard = styled(Card)`
-  padding: 16px;
-  border-radius: ${borderRadius.large};
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: ${shadows.card};
-  display: grid;
-  gap: 10px;
-`;
-
-const HeroGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1.1fr 1fr;
-  gap: 14px;
-  ${mediaQuery('tablet')} {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const HeroPanel = styled.div`
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: ${borderRadius.large};
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.82);
-  display: grid;
-  gap: 10px;
-`;
-
-const HeroLabel = styled.div`
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 900;
-  color: rgba(15, 23, 42, 0.55);
-`;
-
-const HeroValue = styled.div`
-  font-size: 1.1rem;
-  font-weight: 950;
-  color: ${colors.textPrimary};
-`;
-
-const SessionQuickGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-`;
-
-const SessionQuickCard = styled.div`
-  border-radius: ${borderRadius.large};
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  background: rgba(255, 255, 255, 0.86);
-  padding: 12px;
-  display: grid;
-  gap: 8px;
-`;
-
-const StrongButton = styled.button`
+const TakeButton = styled.button`
   border: none;
-  border-radius: 12px;
-  padding: 11px 14px;
-  font-weight: 900;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #6da0ff, #4d70da);
   color: #fff;
-  background: linear-gradient(135deg, #0f766e, #0369a1);
+  padding: 11px 18px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(84, 108, 188, 0.24);
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 12px 24px rgba(3, 105, 161, 0.26);
-    filter: saturate(1.05);
-  }
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-`;
-
-const NeutralButton = styled.button`
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-weight: 850;
-  color: ${colors.textPrimary};
-  background: rgba(255, 255, 255, 0.94);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-`;
-
-const FaceStrip = styled.div`
-  border: 1px solid rgba(2, 132, 199, 0.22);
-  border-radius: ${borderRadius.large};
-  padding: 12px;
-  background: linear-gradient(135deg, rgba(2, 132, 199, 0.08), rgba(14, 116, 144, 0.05));
-  display: grid;
-  gap: 10px;
-`;
-
-const DetailGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  ${mediaQuery('tablet')} {
-    grid-template-columns: 1fr;
-  }
 `;
 
 const FaceModalBackdrop = styled.div`
@@ -245,9 +330,6 @@ const FaceStateBadge = styled.span`
         : 'rgba(59, 130, 246, 0.14)'};
 `;
 
-const formatDateLong = (d) =>
-  new Date(d).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
 const fmtTime = (value) => {
   if (!value) return '—';
   try {
@@ -258,6 +340,22 @@ const fmtTime = (value) => {
   }
 };
 
+const formatDateHuman = (d) =>
+  new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+
+const formatWeekday = (d) => new Date(d).toLocaleDateString('en-US', { weekday: 'long' });
+
+const calcHours = (inAt, outAt) => {
+  if (!inAt || !outAt) return '--';
+  const start = new Date(inAt).getTime();
+  const end = new Date(outAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return '--';
+  const minutes = Math.round((end - start) / 60000);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m`;
+};
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FACE_API_SCRIPT_ID = 'face-api-js-runtime';
 
@@ -265,6 +363,7 @@ const StaffAttendance = () => {
   const { api, user } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [faceFlow, setFaceFlow] = useState({
     open: false,
@@ -285,8 +384,6 @@ const StaffAttendance = () => {
   const faceApiRef = useRef(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const morningDeadline = process.env.REACT_APP_STAFF_MORNING_DEADLINE || '08:00';
-  const afternoonDeadline = process.env.REACT_APP_STAFF_AFTERNOON_DEADLINE || '15:00';
   const modelUri = process.env.REACT_APP_FACE_MODELS_URI || '/models';
   const faceApiCdn = process.env.REACT_APP_FACE_API_CDN || 'https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js';
 
@@ -305,26 +402,6 @@ const StaffAttendance = () => {
   useEffect(() => {
     fetchMe();
   }, [fetchMe]);
-
-  const checkIn = async (session) => {
-    try {
-      await api.post('/api/staff-attendance/check-in', { session });
-      toast.success(`Check-in recorded (${session}).`);
-      await fetchMe();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Check-in failed.');
-    }
-  };
-
-  const checkOut = async (session) => {
-    try {
-      await api.post('/api/staff-attendance/check-out', { session });
-      toast.success(`Check-out recorded (${session}).`);
-      await fetchMe();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Check-out failed.');
-    }
-  };
 
   const bySession = useMemo(() => {
     const map = new Map(rows.map((r) => [r.session, r]));
@@ -695,79 +772,153 @@ const StaffAttendance = () => {
     runFaceAttendance(session);
   }, [faceFlow.session, runFaceAttendance]);
 
+  const overallStatus = useMemo(() => {
+    const statuses = [bySession.morning?.status, bySession.afternoon?.status].filter(Boolean);
+    const presentCount = statuses.filter((s) => String(s).toLowerCase() === 'present').length;
+    const pct = statuses.length ? Math.round((presentCount / statuses.length) * 100) : 0;
+    return {
+      label: pct === 100 ? 'Present' : 'Absent',
+      pct,
+    };
+  }, [bySession.afternoon?.status, bySession.morning?.status]);
+
+  const nextFaceSession = useMemo(() => {
+    const morningDone = String(bySession.morning?.status || '').toLowerCase() === 'present';
+    return morningDone ? 'afternoon' : 'morning';
+  }, [bySession.morning?.status]);
+
+  const tableRows = useMemo(() => {
+    const base = rows.map((r, idx) => ({
+      key: `${r.session || 'session'}-${idx}`,
+      serial: idx + 1,
+      code: r.session === 'morning' ? 'M' : 'A',
+      dateLabel: formatDateHuman(r.date || today),
+      status: String(r.status || 'absent').toLowerCase(),
+      checkIn: fmtTime(r.check_in_at),
+      checkOut: fmtTime(r.check_out_at),
+      hours: calcHours(r.check_in_at, r.check_out_at),
+      note: r.session || '',
+    }));
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return base;
+    return base.filter((r) =>
+      [r.dateLabel, r.status, r.checkIn, r.checkOut, r.hours, r.note, r.code].join(' ').toLowerCase().includes(term)
+    );
+  }, [rows, searchTerm, today]);
+
   return (
     <Wrapper>
-      <PageHeader>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <FaUserCheck /> Staff Attendance
-        </h1>
-        <p style={{ color: colors.textSecondary, fontWeight: 800, lineHeight: 1.6 }}>
-          Record your daily presence. School policy deadlines: Morning by <strong>{morningDeadline}</strong>, Afternoon by{' '}
-          <strong>{afternoonDeadline}</strong>. (Admins can override when necessary.)
-        </p>
-      </PageHeader>
+      <TopBar>
+        <TitleWrap>
+          <PageTitle>Attendance</PageTitle>
+          <SubTitle>View & Track Your Daily Attendance</SubTitle>
+        </TitleWrap>
+        <SearchBar>
+          <FaSearch />
+          <SearchInput
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search past records..."
+          />
+        </SearchBar>
+      </TopBar>
 
-      <Hero>
-        <HeroGrid>
-          <HeroPanel>
-            <HeroLabel>Today</HeroLabel>
-            <HeroValue>{formatDateLong(today)}</HeroValue>
-            <div style={{ color: colors.textSecondary, fontWeight: 850 }}>
-              Staff: <strong>{user?.first_name || user?.firstName || '—'} {user?.last_name || user?.lastName || ''}</strong>
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Badge>
-                <FaClock /> Deadlines: {morningDeadline} / {afternoonDeadline}
-              </Badge>
-              <SecondaryButton onClick={fetchMe} disabled={loading} style={{ borderRadius: 999 }}>
-                <FaSyncAlt /> Refresh
-              </SecondaryButton>
-            </div>
-          </HeroPanel>
+      <SummaryRow>
+        <SummaryCard>
+          <SummaryMeta>
+            <SummaryLabel>Today&apos;s Date</SummaryLabel>
+            <SummaryValue>{formatDateHuman(today)}</SummaryValue>
+            <SummarySub>
+              <FaRegCalendarAlt /> {formatWeekday(today)}
+            </SummarySub>
+          </SummaryMeta>
+        </SummaryCard>
 
-          <SessionQuickGrid>
-            <SessionQuickCard>
-              <HeroLabel>Morning</HeroLabel>
-              <StatusPill $status={bySession.morning?.status || 'absent'}>
-                {(bySession.morning?.status || 'not recorded').toUpperCase()}
-              </StatusPill>
-              <div style={{ display: 'grid', gap: 8 }}>
-                <StrongButton onClick={() => checkIn('morning')} type="button">
-                  <FaDoorOpen /> Check In
-                </StrongButton>
-                <NeutralButton onClick={() => checkOut('morning')} type="button">
-                  <FaDoorClosed /> Check Out
-                </NeutralButton>
-              </div>
-            </SessionQuickCard>
+        <SummaryCard>
+          <SummaryMeta>
+            <SummaryLabel>Your Status Today</SummaryLabel>
+            <StatusText $status={overallStatus.label.toLowerCase()}>{overallStatus.label}</StatusText>
+            <StatusPercent>({overallStatus.pct}%)</StatusPercent>
+          </SummaryMeta>
+          <StatusIconWrap>
+            <FaUserTimes />
+          </StatusIconWrap>
+        </SummaryCard>
+      </SummaryRow>
 
-            <SessionQuickCard>
-              <HeroLabel>Afternoon</HeroLabel>
-              <StatusPill $status={bySession.afternoon?.status || 'absent'}>
-                {(bySession.afternoon?.status || 'not recorded').toUpperCase()}
-              </StatusPill>
-              <div style={{ display: 'grid', gap: 8 }}>
-                <StrongButton onClick={() => checkIn('afternoon')} type="button">
-                  <FaDoorOpen /> Check In
-                </StrongButton>
-                <NeutralButton onClick={() => checkOut('afternoon')} type="button">
-                  <FaDoorClosed /> Check Out
-                </NeutralButton>
-              </div>
-            </SessionQuickCard>
-          </SessionQuickGrid>
-        </HeroGrid>
+      <RecordsCard>
+        <RecordsHeader>
+          <RecordsTitle>Attendance Records</RecordsTitle>
+          <FilterPill type="button">
+            <FaCalendarAlt />
+            {new Date(today).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            <FaChevronDown style={{ marginLeft: 'auto' }} />
+          </FilterPill>
+        </RecordsHeader>
 
-        <FaceStrip>
-          <div style={{ fontWeight: 950, color: colors.textPrimary }}>Face Attendance Verification</div>
-          <ActionsRow style={{ marginTop: 0 }}>
-            <StrongButton onClick={() => runFaceAttendance('morning')} type="button">
-              <FaUserCheck /> Mark Morning (Face)
-            </StrongButton>
-            <StrongButton onClick={() => runFaceAttendance('afternoon')} type="button">
-              <FaUserCheck /> Mark Afternoon (Face)
-            </StrongButton>
+        <TableWrap>
+          <RecordsTable>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>#</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Clock In</th>
+                <th>Clock Out</th>
+                <th>Hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', color: '#7b8dbc', padding: '18px 12px' }}>
+                    No attendance records found.
+                  </td>
+                </tr>
+              )}
+              {tableRows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.serial}</td>
+                  <td>
+                    <NameCell>
+                      <span style={{ color: '#7d8eb8', fontWeight: 700 }}>{row.code}</span>
+                      <Avatar>
+                        {(user?.first_name || user?.firstName || 'S').slice(0, 1).toUpperCase()}
+                      </Avatar>
+                    </NameCell>
+                  </td>
+                  <td>
+                    <strong>{row.dateLabel}</strong>{' '}
+                    <span style={{ color: '#7d8eb8', fontWeight: 600 }}>{row.serial === 1 ? 'Today' : row.note}</span>
+                  </td>
+                  <td>
+                    <StatusTag $status={row.status}>{row.status === 'present' ? 'Present' : 'Absent'}</StatusTag>
+                  </td>
+                  <td>{row.checkIn}</td>
+                  <td>{row.checkOut}</td>
+                  <td>{row.hours}</td>
+                </tr>
+              ))}
+            </tbody>
+          </RecordsTable>
+        </TableWrap>
 
+        <TableFooter>
+          <div>Showing 1 - {tableRows.length} of {tableRows.length}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <SecondaryButton onClick={fetchMe} disabled={loading} style={{ borderRadius: 12 }}>
+              <FaSyncAlt /> Refresh
+            </SecondaryButton>
+            <TakeButton type="button" onClick={() => runFaceAttendance(nextFaceSession)}>
+              <FaFingerprint /> Take Attendance
+            </TakeButton>
+          </div>
+        </TableFooter>
+
+        {(faceResultBySession.morning || faceResultBySession.afternoon) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {faceResultBySession.morning && (
               <FaceStateBadge $state={faceResultBySession.morning.state}>
                 Morning: {faceResultBySession.morning.message}
@@ -778,82 +929,9 @@ const StaffAttendance = () => {
                 Afternoon: {faceResultBySession.afternoon.message}
               </FaceStateBadge>
             )}
-          </ActionsRow>
-        </FaceStrip>
-      </Hero>
-
-      <Section>
-        <SectionTitle>Today Overview</SectionTitle>
-        <StatsGrid>
-          <StatCard>
-            <div className="stat-icon">🌅</div>
-            <div className="stat-meta">
-              <div className="stat-number">
-                <StatusPill $status={bySession.morning?.status || 'absent'}>
-                  {(bySession.morning?.status || 'not recorded').toUpperCase()}
-                </StatusPill>
-              </div>
-              <div className="stat-label">Morning Status</div>
-            </div>
-          </StatCard>
-          <StatCard>
-            <div className="stat-icon">🌇</div>
-            <div className="stat-meta">
-              <div className="stat-number">
-                <StatusPill $status={bySession.afternoon?.status || 'absent'}>
-                  {(bySession.afternoon?.status || 'not recorded').toUpperCase()}
-                </StatusPill>
-              </div>
-              <div className="stat-label">Afternoon Status</div>
-            </div>
-          </StatCard>
-        </StatsGrid>
-      </Section>
-
-      <Section>
-        <SectionTitle>Details</SectionTitle>
-        <DetailGrid>
-          <SessionCard>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 950 }}>Morning</div>
-              <StatusPill $status={bySession.morning?.status || 'absent'}>
-                {(bySession.morning?.status || 'not recorded').toUpperCase()}
-              </StatusPill>
-            </div>
-            <div style={{ display: 'grid', gap: 6, color: colors.textSecondary, fontWeight: 850 }}>
-              <div>
-                <strong>Check-in:</strong> {fmtTime(bySession.morning?.check_in_at)}
-              </div>
-              <div>
-                <strong>Check-out:</strong> {fmtTime(bySession.morning?.check_out_at)}
-              </div>
-              <div>
-                <strong>Notes:</strong> {bySession.morning?.notes || '—'}
-              </div>
-            </div>
-          </SessionCard>
-
-          <SessionCard>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 950 }}>Afternoon</div>
-              <StatusPill $status={bySession.afternoon?.status || 'absent'}>
-                {(bySession.afternoon?.status || 'not recorded').toUpperCase()}
-              </StatusPill>
-            </div>
-            <div style={{ display: 'grid', gap: 6, color: colors.textSecondary, fontWeight: 850 }}>
-              <div>
-                <strong>Check-in:</strong> {fmtTime(bySession.afternoon?.check_in_at)}
-              </div>
-              <div>
-                <strong>Check-out:</strong> {fmtTime(bySession.afternoon?.check_out_at)}
-              </div>
-              <div>
-                <strong>Notes:</strong> {bySession.afternoon?.notes || '—'}
-              </div>
-            </div>
-          </SessionCard>
-        </DetailGrid>
-      </Section>
+          </div>
+        )}
+      </RecordsCard>
 
       {faceFlow.open && (
         <FaceModalBackdrop>
@@ -882,9 +960,9 @@ const StaffAttendance = () => {
 
             {faceFlow.phase === 'failed' && (
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <PrimaryButton type="button" onClick={retryFaceFlow}>
+                <TakeButton type="button" onClick={retryFaceFlow}>
                   Retry
-                </PrimaryButton>
+                </TakeButton>
                 <SecondaryButton type="button" onClick={closeFaceFlow}>
                   Cancel
                 </SecondaryButton>
@@ -893,9 +971,9 @@ const StaffAttendance = () => {
 
             {faceFlow.phase === 'success' && (
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <PrimaryButton type="button" onClick={closeFaceFlow}>
+                <TakeButton type="button" onClick={closeFaceFlow}>
                   Done
-                </PrimaryButton>
+                </TakeButton>
               </div>
             )}
           </FaceModalCard>
