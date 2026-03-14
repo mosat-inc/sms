@@ -59,6 +59,27 @@ const hostedFaceModelFiles = new Set([
 const hostedFaceModelsBaseUrl =
     process.env.FACE_MODELS_SOURCE_URL ||
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+const hostedFaceModelExpectedSizes = {
+    'tiny_face_detector_model-weights_manifest.json': 2953,
+    'tiny_face_detector_model-shard1': 193321,
+    'face_landmark_68_model-weights_manifest.json': 7889,
+    'face_landmark_68_model-shard1': 356840,
+    'face_recognition_model-weights_manifest.json': 18303,
+    'face_recognition_model-shard1': 2112064,
+    'face_recognition_model-shard2': 2249728
+};
+
+const hasValidHostedFaceModelFile = (filePath, fileName) => {
+    try {
+        const stats = fs.statSync(filePath);
+        if (!stats.isFile()) return false;
+        const expectedSize = hostedFaceModelExpectedSizes[fileName];
+        if (!expectedSize) return stats.size > 0;
+        return stats.size === expectedSize;
+    } catch (_error) {
+        return false;
+    }
+};
 
 // Trust proxy for proper client IP detection
 app.set('trust proxy', 1); // if behind a proxy or for proper IPs in dev
@@ -170,12 +191,15 @@ app.use('/models', async (req, res, next) => {
     }
 
     const localPath = path.join(hostedFaceModelsDir, fileName);
-    if (fs.existsSync(localPath)) {
+    if (hasValidHostedFaceModelFile(localPath, fileName)) {
         return res.sendFile(localPath);
     }
 
     try {
         fs.mkdirSync(hostedFaceModelsDir, { recursive: true });
+        if (fs.existsSync(localPath)) {
+            fs.unlinkSync(localPath);
+        }
         const remoteUrl = `${hostedFaceModelsBaseUrl.replace(/\/$/, '')}/${fileName}`;
         const response = await axios.get(remoteUrl, {
             responseType: 'arraybuffer',
@@ -184,7 +208,14 @@ app.use('/models', async (req, res, next) => {
         });
 
         const buffer = Buffer.from(response.data);
-        fs.writeFileSync(localPath, buffer);
+        const expectedSize = hostedFaceModelExpectedSizes[fileName];
+        if (expectedSize && buffer.length !== expectedSize) {
+            throw new Error(`Fetched model file has unexpected size for ${fileName}: expected ${expectedSize}, got ${buffer.length}`);
+        }
+
+        const tempPath = `${localPath}.tmp`;
+        fs.writeFileSync(tempPath, buffer);
+        fs.renameSync(tempPath, localPath);
         if (fileName.endsWith('.json')) {
             res.type('application/json');
         } else {
