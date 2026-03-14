@@ -360,6 +360,25 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FACE_API_SCRIPT_ID = 'face-api-js-runtime';
 const DEFAULT_FACE_API_SCRIPT = '/vendor/face-api.min.js';
 const DEFAULT_FACE_MODELS_URI = '/models';
+const FACE_MODEL_TIMEOUT_MS = 120000;
+
+const withTimeout = (promise, ms, label) =>
+  new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(ms / 1000)} seconds.`));
+    }, ms);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
 
 const StaffAttendance = () => {
   const { api, user } = useAuth();
@@ -467,15 +486,18 @@ const StaffAttendance = () => {
       throw new Error('face-api.js runtime is unavailable.');
     }
 
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(modelUri),
-      faceapi.nets.faceLandmark68Net.loadFromUri(modelUri),
-      faceapi.nets.faceRecognitionNet.loadFromUri(modelUri),
-    ]);
+    setFaceMessage('Loading face detector model...');
+    await withTimeout(faceapi.nets.tinyFaceDetector.loadFromUri(modelUri), 45000, 'Tiny face detector model');
+
+    setFaceMessage('Loading face landmarks model...');
+    await withTimeout(faceapi.nets.faceLandmark68Net.loadFromUri(modelUri), 60000, 'Face landmark model');
+
+    setFaceMessage('Loading face recognition model...');
+    await withTimeout(faceapi.nets.faceRecognitionNet.loadFromUri(modelUri), FACE_MODEL_TIMEOUT_MS, 'Face recognition model');
 
     faceApiRef.current = faceapi;
     return faceapi;
-  }, [faceApiCdn, modelUri]);
+  }, [faceApiCdn, modelUri, setFaceMessage]);
 
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
