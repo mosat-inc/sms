@@ -133,43 +133,65 @@ function normalizeTemplateVectors(raw: unknown): number[][] {
 }
 
 async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
+  const probeRequiredTables = async () => {
+    const foundTables: string[] = [];
+    const missing: string[] = [];
+    const probeErrors: Array<{ table: string; code?: string; message: string }> = [];
+
+    for (const tableName of REQUIRED_FACE_TABLES) {
+      try {
+        await conn.query(`SELECT 1 FROM \`${tableName}\` LIMIT 0`);
+        foundTables.push(tableName);
+      } catch (error: any) {
+        const code = String(error?.code || '');
+        if (code === 'ER_NO_SUCH_TABLE') {
+          missing.push(tableName);
+        } else {
+          probeErrors.push({
+            table: tableName,
+            code: code || undefined,
+            message: String(error?.message || 'Unknown schema probe error'),
+          });
+        }
+      }
+    }
+
+    return { foundTables, missing, probeErrors };
+  };
+
   const getSchemaState = async () => {
     const [dbRows] = await conn.query<RowDataPacket[]>('SELECT DATABASE() AS db_name');
     const dbName = String(dbRows?.[0]?.db_name || '').trim() || null;
-    const [rows] = await conn.execute<RowDataPacket[]>(
-      `SELECT table_name
-       FROM information_schema.tables
-       WHERE table_schema = DATABASE()
-         AND table_name IN (${REQUIRED_FACE_TABLES.map(() => '?').join(',')})`,
-      [...REQUIRED_FACE_TABLES]
-    );
-
-    const foundTables = rows.map((row) => String(row.table_name));
-    const found = new Set(foundTables);
-    const missing = REQUIRED_FACE_TABLES.filter((name) => !found.has(name));
-    return { dbName, foundTables, missing };
+    const { foundTables, missing, probeErrors } = await probeRequiredTables();
+    return { dbName, foundTables, missing, probeErrors };
   };
 
   let state = await getSchemaState();
-  if (!state.missing.length) return;
+  if (!state.missing.length && !state.probeErrors.length) return;
 
   console.warn(
-    `Face attendance schema missing in database=${state.dbName || 'unknown'} missing=${state.missing.join(',')}`
+    `Face attendance schema issue in database=${state.dbName || 'unknown'} missing=${state.missing.join(',') || 'none'} probeErrors=${state.probeErrors.length}`
   );
 
   // Self-heal in production/startup drift scenarios.
   await addFaceAttendanceTables();
   state = await getSchemaState();
 
-  if (state.missing.length) {
-    const error = new Error(`Face attendance tables are missing: ${state.missing.join(', ')}`);
+  if (state.missing.length || state.probeErrors.length) {
+    const issueSummary = [
+      state.missing.length ? `missing: ${state.missing.join(', ')}` : null,
+      state.probeErrors.length ? `probeErrors: ${state.probeErrors.map((item) => `${item.table}:${item.code || 'UNKNOWN'}`).join(', ')}` : null,
+    ].filter(Boolean).join('; ');
+
+    const error = new Error(`Face attendance schema is unavailable (${issueSummary})`);
     (error as any).apiCode = 'SERVICE_UNAVAILABLE';
     (error as any).status = 503;
     (error as any).details = {
       database: state.dbName,
       foundTables: state.foundTables,
       missingTables: state.missing,
-      fix: 'Verify Render DB config and rerun face attendance migration on the active database.',
+      probeErrors: state.probeErrors,
+      fix: 'Verify the active Render database and table permissions, then rerun the face attendance migration on that database.',
     };
     throw error;
   }
