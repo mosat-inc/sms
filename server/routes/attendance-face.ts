@@ -224,9 +224,8 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
   let conn: PoolConnection | null = null;
   try {
     conn = await pool.getConnection();
-    await conn.beginTransaction();
-
     await ensureFaceAttendanceSchema(conn);
+    await conn.beginTransaction();
 
     const orgId = await resolveOrgId(conn, req);
 
@@ -306,9 +305,8 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
   let conn: PoolConnection | null = null;
   try {
     conn = await pool.getConnection();
-    await conn.beginTransaction();
-
     await ensureFaceAttendanceSchema(conn);
+    await conn.beginTransaction();
 
     const orgId = await resolveOrgId(conn, req);
 
