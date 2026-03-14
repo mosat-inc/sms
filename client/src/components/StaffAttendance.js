@@ -528,6 +528,28 @@ const StaffAttendance = () => {
     return (A + B) / (2 * C);
   };
 
+  const getNoseOffsetFromEyes = (landmarks) => {
+    const leftEye = landmarks.getLeftEye();
+    const rightEye = landmarks.getRightEye();
+    const nose = landmarks.getNose();
+
+    if (!leftEye?.length || !rightEye?.length || !nose?.length) {
+      return null;
+    }
+
+    const leftEyeOuter = leftEye[0];
+    const rightEyeOuter = rightEye[3];
+    const noseTip = nose[Math.floor(nose.length / 2)];
+    const eyeMidX = (leftEyeOuter.x + rightEyeOuter.x) / 2;
+    const eyeDistance = Math.max(1, Math.abs(rightEyeOuter.x - leftEyeOuter.x));
+
+    return {
+      normalizedDelta: (noseTip.x - eyeMidX) / eyeDistance,
+      leftEye,
+      rightEye,
+    };
+  };
+
   const runLivenessChallenge = useCallback(
     async (challengeType) => {
       const faceapi = faceApiRef.current;
@@ -536,18 +558,24 @@ const StaffAttendance = () => {
 
       const detectorOpts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
       const startedAt = Date.now();
-      const timeoutMs = 6000;
+      const timeoutMs = 10000;
 
       let blinkCount = 0;
       let wasClosed = false;
-      let neutralNoseX = null;
       let sawLeft = false;
+      let lastBlinkAt = 0;
+      let bestLeftOffset = 0;
+      let bestRightOffset = 0;
 
       const metrics = {
         blinkCount: 0,
         sawLeft: false,
         sawRight: false,
         elapsedMs: 0,
+        currentEAR: null,
+        currentOffset: null,
+        bestLeftOffset: 0,
+        bestRightOffset: 0,
       };
 
       while (Date.now() - startedAt < timeoutMs) {
@@ -568,48 +596,54 @@ const StaffAttendance = () => {
           const leftEye = landmarks.getLeftEye();
           const rightEye = landmarks.getRightEye();
           const ear = (eyeAspectRatio(leftEye) + eyeAspectRatio(rightEye)) / 2;
-          const closed = ear < 0.2;
-          const open = ear > 0.24;
+          const closed = ear <= 0.215;
+          const open = ear >= 0.235;
 
           if (closed) wasClosed = true;
-          if (wasClosed && open) {
+          if (wasClosed && open && Date.now() - lastBlinkAt >= 220) {
             blinkCount += 1;
             wasClosed = false;
+            lastBlinkAt = Date.now();
           }
 
           metrics.blinkCount = blinkCount;
           metrics.elapsedMs = Date.now() - startedAt;
+          metrics.currentEAR = Number(ear.toFixed(3));
 
-          setFaceMessage(`Blinks detected: ${blinkCount}/2`);
+          setFaceMessage(`Blink naturally twice. Detected ${blinkCount}/2 blinks.`);
 
           if (blinkCount >= 2) {
             return { passed: true, type: 'BLINK_2X', metrics };
           }
         } else {
-          const nose = landmarks.getNose();
-          const jaw = landmarks.getJawOutline();
-          if (!nose?.length || jaw.length < 17) {
+          const noseOffset = getNoseOffsetFromEyes(landmarks);
+          if (!noseOffset) {
             await wait(80);
             continue;
           }
 
-          const noseTip = nose[Math.floor(nose.length / 2)];
-          const faceWidth = Math.max(1, Math.abs(jaw[16].x - jaw[0].x));
+          const { normalizedDelta } = noseOffset;
+          bestLeftOffset = Math.min(bestLeftOffset, normalizedDelta);
+          bestRightOffset = Math.max(bestRightOffset, normalizedDelta);
+          metrics.currentOffset = Number(normalizedDelta.toFixed(3));
+          metrics.bestLeftOffset = Number(bestLeftOffset.toFixed(3));
+          metrics.bestRightOffset = Number(bestRightOffset.toFixed(3));
 
-          if (neutralNoseX === null) neutralNoseX = noseTip.x;
-          const normalizedDelta = (noseTip.x - neutralNoseX) / faceWidth;
-
-          if (!sawLeft && normalizedDelta < -0.08) {
+          if (!sawLeft && normalizedDelta <= -0.05) {
             sawLeft = true;
             metrics.sawLeft = true;
           }
-          if (sawLeft && normalizedDelta > 0.08) {
+          if (sawLeft && normalizedDelta >= 0.05) {
             metrics.sawRight = true;
             metrics.elapsedMs = Date.now() - startedAt;
             return { passed: true, type: 'TURN_HEAD_LR', metrics };
           }
 
-          setFaceMessage(sawLeft ? 'Good. Now turn your head to the right.' : 'Turn your head to the left first.');
+          setFaceMessage(
+            sawLeft
+              ? 'Left side detected. Now turn your head to the right.'
+              : 'Turn your head slightly to the left until detected.'
+          );
         }
 
         await wait(80);
