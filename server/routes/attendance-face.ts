@@ -197,19 +197,40 @@ async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
   }
 }
 
-async function resolveOrgId(conn: PoolConnection, req: AuthenticatedRequest): Promise<number> {
-  if (req.user?.schoolId && Number(req.user.schoolId) > 0) return Number(req.user.schoolId);
+async function resolveOrgId(conn: PoolConnection, req: AuthenticatedRequest, targetUserId?: number): Promise<number> {
+  const candidateIds: number[] = [];
 
-  if (!req.user?.id) throw new Error('Missing authenticated user');
+  if (req.user?.schoolId && Number(req.user.schoolId) > 0) {
+    return Number(req.user.schoolId);
+  }
 
-  const [rows] = await conn.execute<RowDataPacket[]>(
-    'SELECT school_id FROM users WHERE id = ? LIMIT 1',
-    [req.user.id]
+  if (req.user?.id && Number(req.user.id) > 0) {
+    candidateIds.push(Number(req.user.id));
+  }
+
+  if (targetUserId && Number(targetUserId) > 0 && !candidateIds.includes(Number(targetUserId))) {
+    candidateIds.push(Number(targetUserId));
+  }
+
+  for (const userId of candidateIds) {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      'SELECT school_id FROM users WHERE id = ? LIMIT 1',
+      [userId]
+    );
+
+    const orgId = Number(rows?.[0]?.school_id || 0);
+    if (orgId > 0) return orgId;
+  }
+
+  const [schoolRows] = await conn.execute<RowDataPacket[]>(
+    'SELECT id FROM schools WHERE is_active = 1 ORDER BY id ASC LIMIT 2'
   );
 
-  const orgId = Number(rows?.[0]?.school_id || 0);
-  if (!orgId) throw new Error('No org/school bound to current user');
-  return orgId;
+  if (schoolRows.length === 1) {
+    return Number(schoolRows[0].id);
+  }
+
+  throw new Error('No org/school bound to current user or target staff account');
 }
 
 async function guardRateLimit(conn: PoolConnection, userId: number, orgId: number): Promise<void> {
@@ -249,7 +270,7 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
     await ensureFaceAttendanceSchema(conn);
     await conn.beginTransaction();
 
-    const orgId = await resolveOrgId(conn, req);
+    const orgId = await resolveOrgId(conn, req, userId);
 
     await guardRateLimit(conn, userId, orgId);
 
@@ -330,7 +351,7 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
     await ensureFaceAttendanceSchema(conn);
     await conn.beginTransaction();
 
-    const orgId = await resolveOrgId(conn, req);
+    const orgId = await resolveOrgId(conn, req, payload.userId);
 
     await guardRateLimit(conn, payload.userId, orgId);
 
