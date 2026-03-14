@@ -359,7 +359,7 @@ const calcHours = (inAt, outAt) => {
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FACE_API_SCRIPT_ID = 'face-api-js-runtime';
 const DEFAULT_FACE_API_SCRIPT = '/vendor/face-api.min.js';
-const DEFAULT_FACE_MODELS_URI = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+const DEFAULT_FACE_MODELS_URI = '/models';
 
 const StaffAttendance = () => {
   const { api, user } = useAuth();

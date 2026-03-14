@@ -2,8 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+const axios = require('axios');
 
 const { testConnection, initializeDatabase } = require('./config/database');
 const { addFaceAttendanceTables } = require('./migrations/add_face_attendance_tables');
@@ -44,6 +46,19 @@ const smsRoutes = require('./routes/sms');
 
 const app = express();
 const port = process.env.PORT || 5000;
+const hostedFaceModelsDir = path.join(__dirname, '../client/public/models');
+const hostedFaceModelFiles = new Set([
+    'tiny_face_detector_model-weights_manifest.json',
+    'tiny_face_detector_model-shard1',
+    'face_landmark_68_model-weights_manifest.json',
+    'face_landmark_68_model-shard1',
+    'face_recognition_model-weights_manifest.json',
+    'face_recognition_model-shard1',
+    'face_recognition_model-shard2'
+]);
+const hostedFaceModelsBaseUrl =
+    process.env.FACE_MODELS_SOURCE_URL ||
+    'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
 
 // Trust proxy for proper client IP detection
 app.set('trust proxy', 1); // if behind a proxy or for proper IPs in dev
@@ -56,7 +71,7 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "https:", "data:"],
-            connectSrc: ["'self'", "http://localhost:5000", "http://localhost:3000", "https://cdn.jsdelivr.net"],
+            connectSrc: ["'self'", "http://localhost:5000", "http://localhost:3000"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"]
         }
     }
@@ -148,6 +163,46 @@ app.use((req, res, next) => {
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/models', async (req, res, next) => {
+    const fileName = path.basename(req.path || '').trim();
+    if (!hostedFaceModelFiles.has(fileName)) {
+        return res.status(404).json({ success: false, message: 'Model file not found' });
+    }
+
+    const localPath = path.join(hostedFaceModelsDir, fileName);
+    if (fs.existsSync(localPath)) {
+        return res.sendFile(localPath);
+    }
+
+    try {
+        fs.mkdirSync(hostedFaceModelsDir, { recursive: true });
+        const remoteUrl = `${hostedFaceModelsBaseUrl.replace(/\/$/, '')}/${fileName}`;
+        const response = await axios.get(remoteUrl, {
+            responseType: 'arraybuffer',
+            timeout: 60000,
+            validateStatus: (status) => status >= 200 && status < 300,
+        });
+
+        const buffer = Buffer.from(response.data);
+        fs.writeFileSync(localPath, buffer);
+        if (fileName.endsWith('.json')) {
+            res.type('application/json');
+        } else {
+            res.type('application/octet-stream');
+        }
+        return res.send(buffer);
+    } catch (error) {
+        logger.error('Failed to fetch hosted face model', {
+            fileName,
+            message: error.message,
+        });
+        return res.status(502).json({
+            success: false,
+            message: 'Failed to fetch face model file',
+            file: fileName,
+        });
+    }
+});
 
 // Logging middleware
 app.use((req, res, next) => {
