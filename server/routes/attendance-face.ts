@@ -132,6 +132,15 @@ function normalizeTemplateVectors(raw: unknown): number[][] {
   return [single];
 }
 
+function toMysqlDateTime(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('-') + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
   const probeRequiredTables = async () => {
     const foundTables: string[] = [];
@@ -338,7 +347,9 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
 
     const challenge = randomChallenge();
     const sessionId = randomUUID();
-    const expiresAtIso = new Date(Date.now() + sessionExpirySeconds * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + sessionExpirySeconds * 1000);
+    const expiresAtIso = expiresAt.toISOString();
+    const expiresAtMySql = toMysqlDateTime(expiresAt);
 
     await conn.execute<ResultSetHeader>(
       `INSERT INTO face_sessions
@@ -351,7 +362,7 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
         challenge.type,
         JSON.stringify(challenge.params),
         SESSION_STATUS.STARTED,
-        expiresAtIso,
+        expiresAtMySql,
       ]
     );
 
