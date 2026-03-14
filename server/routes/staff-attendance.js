@@ -5,6 +5,7 @@ const { requireOnPremises } = require('../middleware/premisesMiddleware');
 
 const router = express.Router();
 router.use(Auth.authenticateToken);
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
 
 const parseTimeToMinutes = (hhmm) => {
   const [h, m] = String(hhmm || '').split(':').map((v) => Number(v));
@@ -12,16 +13,48 @@ const parseTimeToMinutes = (hhmm) => {
   return h * 60 + m;
 };
 
-const nowMinutes = () => {
-  const d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
+const getTimezoneParts = (date = new Date()) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
 };
 
-const formatDate = (d) => d.toISOString().split('T')[0];
+const nowMinutes = (date = new Date()) => {
+  const parts = getTimezoneParts(date);
+  return parts.hour * 60 + parts.minute;
+};
 
-const resolveSession = (requested) => {
+const formatDate = (date = new Date()) => {
+  const parts = getTimezoneParts(date);
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+};
+
+const resolveSession = (requested, date = new Date()) => {
   if (requested === 'morning' || requested === 'afternoon') return requested;
-  const hr = new Date().getHours();
+  const hr = getTimezoneParts(date).hour;
   return hr < 12 ? 'morning' : 'afternoon';
 };
 
@@ -31,13 +64,14 @@ router.post('/check-in', requireOnPremises({ allowAdminBypass: true }), async (r
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const session = resolveSession(req.body?.session);
-    const today = formatDate(new Date());
+    const now = new Date();
+    const session = resolveSession(req.body?.session, now);
+    const today = formatDate(now);
 
     const morningDeadline = parseTimeToMinutes(process.env.STAFF_MORNING_DEADLINE || '08:00') ?? 480;
     const afternoonDeadline = parseTimeToMinutes(process.env.STAFF_AFTERNOON_DEADLINE || '15:00') ?? 900;
 
-    const minuteNow = nowMinutes();
+    const minuteNow = nowMinutes(now);
     let status = 'present';
     if (session === 'morning' && minuteNow > morningDeadline) status = 'late';
     if (session === 'afternoon' && minuteNow > afternoonDeadline) status = 'late';
@@ -96,8 +130,9 @@ router.post('/check-out', requireOnPremises({ allowAdminBypass: true }), async (
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const session = resolveSession(req.body?.session);
-    const today = formatDate(new Date());
+    const now = new Date();
+    const session = resolveSession(req.body?.session, now);
+    const today = formatDate(now);
 
     await pool.execute(
       `
@@ -158,4 +193,3 @@ router.get('/summary', Auth.requireRole(['admin']), async (req, res) => {
 });
 
 module.exports = router;
-

@@ -42,6 +42,9 @@ const totalFramesExpected = Number(process.env.FACE_ATTENDANCE_TOTAL_FRAMES || 5
 const rateLimitAttempts = Number(process.env.FACE_ATTENDANCE_MAX_ATTEMPTS_10M || 5);
 const sessionExpirySeconds = 120;
 const REQUIRED_FACE_TABLES = ['face_sessions', 'face_templates', 'attendance_attempts', 'attendance_events'] as const;
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
+const strictSimilarityThreshold = Math.max(similarityThreshold, 0.82);
+const strictPassingFrames = Math.max(requiredPassingFrames, 4);
 
 const startSchema = z.object({
   userId: z.coerce.number().int().positive(),
@@ -109,6 +112,51 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
+function averageVector(vectors: number[][]): number[] {
+  if (!vectors.length) throw new Error('At least one descriptor vector is required');
+  const size = vectors[0].length;
+  const sums = new Array(size).fill(0);
+
+  for (const vector of vectors) {
+    if (vector.length !== size) {
+      throw new Error('Descriptor vectors must all have the same length');
+    }
+    for (let i = 0; i < size; i += 1) {
+      sums[i] += vector[i];
+    }
+  }
+
+  return sums.map((value) => value / vectors.length);
+}
+
+function normalizeDescriptorVectors(raw: number[][]): number[][] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('Descriptor list is required');
+  }
+
+  const width = raw[0].length;
+  return raw.map((vector) => {
+    if (!Array.isArray(vector) || vector.length !== width) {
+      throw new Error('Descriptor vectors must have consistent dimensions');
+    }
+    if (vector.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+      throw new Error('Descriptor vectors must be numeric');
+    }
+    return vector.map((value) => Number(value));
+  });
+}
+
+function serializeTemplate(vectors: number[][]) {
+  const normalizedVectors = normalizeDescriptorVectors(vectors);
+  const centroid = averageVector(normalizedVectors);
+  return {
+    version: 2,
+    vectors: normalizedVectors,
+    centroid,
+    sampleCount: normalizedVectors.length,
+  };
+}
+
 function randomChallenge() {
   const type = CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
   if (type === 'BLINK_2X') {
@@ -143,6 +191,20 @@ function normalizeTemplateVectors(raw: unknown): number[][] {
   return [single];
 }
 
+function parseStoredTemplate(rawJson: string): { vectors: number[][]; centroid: number[] } {
+  const parsed = JSON.parse(rawJson);
+
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const vectors = normalizeDescriptorVectors((parsed as any).vectors || []);
+    const centroidSource = Array.isArray((parsed as any).centroid) ? [(parsed as any).centroid] : [];
+    const centroid = centroidSource.length ? normalizeDescriptorVectors(centroidSource)[0] : averageVector(vectors);
+    return { vectors, centroid };
+  }
+
+  const vectors = normalizeTemplateVectors(parsed);
+  return { vectors, centroid: averageVector(vectors) };
+}
+
 function toMysqlDateTime(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return [
@@ -150,6 +212,66 @@ function toMysqlDateTime(date: Date): string {
     pad(date.getMonth() + 1),
     pad(date.getDate()),
   ].join('-') + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function getTimezoneParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  const second = Number(parts.second);
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    dateTime: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`,
+  };
+}
+
+function resolveStaffSession(date = new Date()): 'morning' | 'afternoon' {
+  return getTimezoneParts(date).hour < 12 ? 'morning' : 'afternoon';
+}
+
+function resolveStaffStatusForNow(session: 'morning' | 'afternoon', date = new Date()): 'present' | 'late' {
+  const parts = getTimezoneParts(date);
+  const minuteNow = parts.hour * 60 + parts.minute;
+  const parseDeadline = (value: string | undefined, fallback: number) => {
+    const [hourRaw, minuteRaw] = String(value || '').split(':');
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallback;
+    return hour * 60 + minute;
+  };
+  const morningDeadline = parseDeadline(process.env.STAFF_MORNING_DEADLINE, 480);
+  const afternoonDeadline = parseDeadline(process.env.STAFF_AFTERNOON_DEADLINE, 900);
+
+  if (session === 'morning' && minuteNow > morningDeadline) return 'late';
+  if (session === 'afternoon' && minuteNow > afternoonDeadline) return 'late';
+  return 'present';
 }
 
 async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
@@ -426,6 +548,8 @@ router.post('/enroll', Auth.authenticateToken, async (req: AuthenticatedRequest,
       return;
     }
 
+    const templatePayload = serializeTemplate(payload.descriptors);
+
     await conn.execute<ResultSetHeader>(
       `UPDATE face_templates
        SET revoked_at = NOW()
@@ -436,7 +560,7 @@ router.post('/enroll', Auth.authenticateToken, async (req: AuthenticatedRequest,
     const [insertResult] = await conn.execute<ResultSetHeader>(
       `INSERT INTO face_templates (user_id, org_id, descriptor_json)
        VALUES (?, ?, ?)`,
-      [payload.userId, orgId, JSON.stringify(payload.descriptors)]
+      [payload.userId, orgId, JSON.stringify(templatePayload)]
     );
 
     await conn.commit();
@@ -648,28 +772,47 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
     }
 
     let templateVectors: number[][];
+    let templateCentroid: number[];
     try {
-      templateVectors = normalizeTemplateVectors(JSON.parse(templateRows[0].descriptor_json));
+      const template = parseStoredTemplate(templateRows[0].descriptor_json);
+      templateVectors = template.vectors;
+      templateCentroid = template.centroid;
     } catch (_error) {
       await conn.rollback();
       return sendError(res, 500, 'INTERNAL_ERROR', 'Stored face template is invalid');
     }
 
+    const incomingVectors = normalizeDescriptorVectors(payload.descriptors);
+    const incomingCentroid = averageVector(incomingVectors);
     const frameScores: number[] = [];
+    const centroidScores: number[] = [];
     let passedFrames = 0;
 
-    for (const descriptor of payload.descriptors) {
-      let best = -1;
+    for (const descriptor of incomingVectors) {
+      let exemplarBest = -1;
       for (const template of templateVectors) {
         const score = cosineSimilarity(descriptor, template);
-        if (score > best) best = score;
+        if (score > exemplarBest) exemplarBest = score;
       }
-      frameScores.push(best);
-      if (best >= similarityThreshold) passedFrames += 1;
+      const centroidScore = cosineSimilarity(descriptor, templateCentroid);
+      centroidScores.push(centroidScore);
+      const blendedScore = (centroidScore * 0.7) + (exemplarBest * 0.3);
+      frameScores.push(blendedScore);
+      if (blendedScore >= strictSimilarityThreshold && centroidScore >= strictSimilarityThreshold - 0.02) {
+        passedFrames += 1;
+      }
     }
 
     const avgScore = frameScores.reduce((sum, score) => sum + score, 0) / frameScores.length;
-    const isMatch = passedFrames >= requiredPassingFrames;
+    const avgCentroidScore = centroidScores.reduce((sum, score) => sum + score, 0) / centroidScores.length;
+    const centroidToTemplateScore = cosineSimilarity(incomingCentroid, templateCentroid);
+    const minFrameScore = Math.min(...frameScores);
+    const isMatch =
+      passedFrames >= strictPassingFrames &&
+      avgScore >= strictSimilarityThreshold &&
+      avgCentroidScore >= strictSimilarityThreshold &&
+      centroidToTemplateScore >= strictSimilarityThreshold &&
+      minFrameScore >= strictSimilarityThreshold - 0.05;
 
     await conn.execute<ResultSetHeader>(
       `INSERT INTO attendance_attempts (user_id, org_id, session_id, success, reason, score)
@@ -679,7 +822,7 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
         orgId,
         payload.sessionId,
         isMatch ? 1 : 0,
-        isMatch ? 'MATCHED' : 'BELOW_THRESHOLD',
+        isMatch ? 'MATCHED' : 'FACE_MISMATCH',
         Number(avgScore.toFixed(5)),
       ]
     );
@@ -690,26 +833,59 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
         [SESSION_STATUS.FAILED, payload.sessionId]
       );
       await conn.commit();
-      return sendError(res, 422, 'UNPROCESSABLE_ENTITY', 'Face verification failed', {
+      return sendError(res, 422, 'UNPROCESSABLE_ENTITY', 'Face does not match the enrolled teacher profile. Attendance was not recorded.', {
         passedFrames,
-        requiredFrames: requiredPassingFrames,
-        threshold: similarityThreshold,
+        requiredFrames: strictPassingFrames,
+        threshold: strictSimilarityThreshold,
         averageScore: Number(avgScore.toFixed(5)),
+        averageCentroidScore: Number(avgCentroidScore.toFixed(5)),
+        centroidScore: Number(centroidToTemplateScore.toFixed(5)),
       });
     }
+
+    const attendanceNow = new Date();
+    const attendanceSession = resolveStaffSession(attendanceNow);
+    const attendanceDate = getTimezoneParts(attendanceNow).date;
+    const attendanceDateTime = getTimezoneParts(attendanceNow).dateTime;
+    const attendanceStatus = resolveStaffStatusForNow(attendanceSession, attendanceNow);
 
     await conn.execute<ResultSetHeader>(
       `INSERT INTO attendance_events
         (user_id, org_id, event_type, happened_at, method, score, threshold, device_hash, ip)
-       VALUES (?, ?, ?, NOW(), 'FACE', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'FACE', ?, ?, ?, ?)`,
       [
         payload.userId,
         orgId,
-        payload.eventType,
+        'IN',
+        attendanceDateTime,
         Number(avgScore.toFixed(5)),
-        similarityThreshold,
+        strictSimilarityThreshold,
         payload.deviceHash,
         req.ip || null,
+      ]
+    );
+
+    await conn.execute<ResultSetHeader>(
+      `
+      INSERT INTO staff_attendance (user_id, date, session, status, check_in_at, notes, ip_address, user_agent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        status = VALUES(status),
+        check_in_at = COALESCE(check_in_at, VALUES(check_in_at)),
+        notes = COALESCE(VALUES(notes), notes),
+        ip_address = COALESCE(VALUES(ip_address), ip_address),
+        user_agent = COALESCE(VALUES(user_agent), user_agent),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        payload.userId,
+        attendanceDate,
+        attendanceSession,
+        attendanceStatus,
+        attendanceDateTime,
+        'Recorded via face attendance',
+        String(req.ip || '').slice(0, 64),
+        String(req.headers['user-agent'] || '').slice(0, 255),
       ]
     );
 
@@ -725,11 +901,14 @@ router.post('/complete', Auth.authenticateToken, async (req: AuthenticatedReques
       data: {
         sessionId: payload.sessionId,
         userId: payload.userId,
-        eventType: payload.eventType,
+        eventType: 'IN',
+        attendanceDate,
+        attendanceSession,
+        attendanceStatus,
         score: Number(avgScore.toFixed(5)),
-        threshold: similarityThreshold,
+        threshold: strictSimilarityThreshold,
         passedFrames,
-        requiredFrames: requiredPassingFrames,
+        requiredFrames: strictPassingFrames,
         matched: true,
       },
     });

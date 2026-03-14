@@ -361,6 +361,23 @@ const FACE_API_SCRIPT_ID = 'face-api-js-runtime';
 const DEFAULT_FACE_API_SCRIPT = '/vendor/face-api.min.js';
 const DEFAULT_FACE_MODELS_URI = '/models-v2';
 const FACE_MODEL_TIMEOUT_MS = 120000;
+const APP_TIMEZONE = 'Africa/Dar_es_Salaam';
+
+const getTimezoneISODate = (date = new Date(), timeZone = APP_TIMEZONE) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
 
 const withTimeout = (promise, ms, label) =>
   new Promise((resolve, reject) => {
@@ -410,7 +427,7 @@ const StaffAttendance = () => {
   const rafRef = useRef(null);
   const faceApiRef = useRef(null);
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const today = useMemo(() => getTimezoneISODate(new Date()), []);
   const modelUri = process.env.REACT_APP_FACE_MODELS_URI || DEFAULT_FACE_MODELS_URI;
   const faceApiCdn = process.env.REACT_APP_FACE_API_CDN || DEFAULT_FACE_API_SCRIPT;
 
@@ -863,7 +880,12 @@ const StaffAttendance = () => {
           [session]: { state: 'success', message: 'Face attendance recorded.' },
         }));
 
-        setFaceFlow((prev) => ({ ...prev, phase: 'success', message: 'Face attendance recorded successfully.' }));
+        const attendanceMeta = completeRes?.data?.data || {};
+        const successMessage = attendanceMeta.attendanceSession
+          ? `Face attendance recorded for the ${attendanceMeta.attendanceSession} session.`
+          : 'Face attendance recorded successfully.';
+
+        setFaceFlow((prev) => ({ ...prev, phase: 'success', message: successMessage }));
         toast.success('Face attendance marked successfully.');
 
         stopCamera();
