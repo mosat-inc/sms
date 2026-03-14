@@ -311,13 +311,29 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
     await guardRateLimit(conn, userId, orgId);
 
     const [userRows] = await conn.execute<RowDataPacket[]>(
-      'SELECT id FROM users WHERE id = ? AND school_id = ? AND is_active = 1 LIMIT 1',
-      [userId, orgId]
+      `SELECT id, role, school_id
+       FROM users
+       WHERE id = ?
+         AND is_active = 1
+       LIMIT 1`,
+      [userId]
     );
 
     if (!userRows.length) {
       await conn.rollback();
+      return sendError(res, 404, 'NOT_FOUND', 'User not found');
+    }
+
+    const targetUser = userRows[0];
+    const targetSchoolId = Number(targetUser.school_id || 0);
+    if (targetSchoolId > 0 && targetSchoolId !== orgId) {
+      await conn.rollback();
       return sendError(res, 404, 'NOT_FOUND', 'User not found in this organization');
+    }
+
+    if (!['teacher', 'admin'].includes(String(targetUser.role || ''))) {
+      await conn.rollback();
+      return sendError(res, 403, 'FORBIDDEN', 'Face attendance is only available for staff accounts');
     }
 
     const challenge = randomChallenge();
