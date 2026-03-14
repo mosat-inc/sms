@@ -5,6 +5,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 
 const Auth = require('../utils/auth');
 const { pool }: { pool: Pool } = require('../config/database');
+const { addFaceAttendanceTables } = require('../migrations/add_face_attendance_tables');
 
 const router = Router();
 
@@ -132,23 +133,43 @@ function normalizeTemplateVectors(raw: unknown): number[][] {
 }
 
 async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
-  const [rows] = await conn.execute<RowDataPacket[]>(
-    `SELECT table_name
-     FROM information_schema.tables
-     WHERE table_schema = DATABASE()
-       AND table_name IN (${REQUIRED_FACE_TABLES.map(() => '?').join(',')})`,
-    [...REQUIRED_FACE_TABLES]
+  const getSchemaState = async () => {
+    const [dbRows] = await conn.query<RowDataPacket[]>('SELECT DATABASE() AS db_name');
+    const dbName = String(dbRows?.[0]?.db_name || '').trim() || null;
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name IN (${REQUIRED_FACE_TABLES.map(() => '?').join(',')})`,
+      [...REQUIRED_FACE_TABLES]
+    );
+
+    const foundTables = rows.map((row) => String(row.table_name));
+    const found = new Set(foundTables);
+    const missing = REQUIRED_FACE_TABLES.filter((name) => !found.has(name));
+    return { dbName, foundTables, missing };
+  };
+
+  let state = await getSchemaState();
+  if (!state.missing.length) return;
+
+  console.warn(
+    `Face attendance schema missing in database=${state.dbName || 'unknown'} missing=${state.missing.join(',')}`
   );
 
-  const found = new Set(rows.map((row) => String(row.table_name)));
-  const missing = REQUIRED_FACE_TABLES.filter((name) => !found.has(name));
-  if (missing.length) {
-    const error = new Error(`Face attendance tables are missing: ${missing.join(', ')}`);
+  // Self-heal in production/startup drift scenarios.
+  await addFaceAttendanceTables();
+  state = await getSchemaState();
+
+  if (state.missing.length) {
+    const error = new Error(`Face attendance tables are missing: ${state.missing.join(', ')}`);
     (error as any).apiCode = 'SERVICE_UNAVAILABLE';
     (error as any).status = 503;
     (error as any).details = {
-      missingTables: missing,
-      fix: 'Run: npm run migrate',
+      database: state.dbName,
+      foundTables: state.foundTables,
+      missingTables: state.missing,
+      fix: 'Verify Render DB config and rerun face attendance migration on the active database.',
     };
     throw error;
   }

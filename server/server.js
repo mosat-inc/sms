@@ -6,6 +6,7 @@ const path = require('path');
 require('dotenv').config();
 
 const { testConnection, initializeDatabase } = require('./config/database');
+const { addFaceAttendanceTables } = require('./migrations/add_face_attendance_tables');
 const { errorHandler, notFoundHandler, initializeGlobalHandlers } = require('./middleware/errorHandler');
 const { rateLimitHandler, addRetryHeaders, gracefulDegradation } = require('./middleware/rateLimitHandler');
 const logger = require('./utils/logger');
@@ -276,6 +277,9 @@ const startServer = async () => {
             // Initialize database schema
             logger.info('📊 Initializing database schema...');
             await initializeDatabase();
+
+            logger.info('🧠 Ensuring face attendance tables exist...');
+            await addFaceAttendanceTables();
             
             // Initialize automatic student promotion scheduler
             logger.info('🎓 Initializing student promotion scheduler...');
