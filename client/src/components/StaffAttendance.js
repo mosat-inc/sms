@@ -566,6 +566,8 @@ const StaffAttendance = () => {
       let lastBlinkAt = 0;
       let bestLeftOffset = 0;
       let bestRightOffset = 0;
+      let noFaceFrames = 0;
+      let multipleFaceFrames = 0;
 
       const metrics = {
         blinkCount: 0,
@@ -576,6 +578,8 @@ const StaffAttendance = () => {
         currentOffset: null,
         bestLeftOffset: 0,
         bestRightOffset: 0,
+        noFaceFrames: 0,
+        multipleFaceFrames: 0,
       };
 
       while (Date.now() - startedAt < timeoutMs) {
@@ -584,7 +588,18 @@ const StaffAttendance = () => {
           .withFaceLandmarks()
           .withFaceDescriptors();
 
-        if (allFaces.length !== 1) {
+        if (allFaces.length === 0) {
+          noFaceFrames += 1;
+          metrics.noFaceFrames = noFaceFrames;
+          setFaceMessage('No face detected. Center your face in the camera and keep enough light on your face.');
+          await wait(80);
+          continue;
+        }
+
+        if (allFaces.length > 1) {
+          multipleFaceFrames += 1;
+          metrics.multipleFaceFrames = multipleFaceFrames;
+          setFaceMessage('Multiple faces detected. Make sure only one person is visible to the camera.');
           await wait(80);
           continue;
         }
@@ -610,10 +625,14 @@ const StaffAttendance = () => {
           metrics.elapsedMs = Date.now() - startedAt;
           metrics.currentEAR = Number(ear.toFixed(3));
 
-          setFaceMessage(`Blink naturally twice. Detected ${blinkCount}/2 blinks.`);
+          setFaceMessage(
+            blinkCount === 0
+              ? 'Blink naturally twice. Keep your face steady and eyes clearly visible.'
+              : `Good. Blink once more. Detected ${blinkCount}/2 blinks.`
+          );
 
           if (blinkCount >= 2) {
-            return { passed: true, type: 'BLINK_2X', metrics };
+            return { passed: true, type: 'BLINK_2X', metrics, reason: '', suggestion: '' };
           }
         } else {
           const noseOffset = getNoseOffsetFromEyes(landmarks);
@@ -636,7 +655,7 @@ const StaffAttendance = () => {
           if (sawLeft && normalizedDelta >= 0.05) {
             metrics.sawRight = true;
             metrics.elapsedMs = Date.now() - startedAt;
-            return { passed: true, type: 'TURN_HEAD_LR', metrics };
+            return { passed: true, type: 'TURN_HEAD_LR', metrics, reason: '', suggestion: '' };
           }
 
           setFaceMessage(
@@ -656,6 +675,30 @@ const StaffAttendance = () => {
           ...metrics,
           elapsedMs: Date.now() - startedAt,
         },
+        reason:
+          multipleFaceFrames > 0
+            ? 'Multiple faces were visible during the liveness check.'
+            : noFaceFrames > 8
+              ? 'Your face was not detected clearly enough during the liveness check.'
+              : challengeType === 'BLINK_2X'
+                ? blinkCount === 0
+                  ? 'No full blinks were detected.'
+                  : 'Only one blink was detected.'
+                : !sawLeft
+                  ? 'The left head turn was not detected.'
+                  : 'The right head turn was not detected after the left turn.',
+        suggestion:
+          multipleFaceFrames > 0
+            ? 'Make sure only one person is in front of the camera and retry.'
+            : noFaceFrames > 8
+              ? 'Move closer, face the camera directly, and improve lighting before retrying.'
+              : challengeType === 'BLINK_2X'
+                ? blinkCount === 0
+                  ? 'Keep your eyes fully visible, then blink naturally twice.'
+                  : 'One blink was detected. Blink one more time with your face steady.'
+                : !sawLeft
+                  ? 'Start by facing forward, then turn your head slightly to the left until it is detected.'
+                  : 'The left turn was detected. After that, turn your head clearly to the right.',
       };
     },
     [setFaceMessage]
@@ -750,13 +793,14 @@ const StaffAttendance = () => {
           phase: 'liveness',
           message:
             payload.challengeType === 'BLINK_2X'
-              ? 'Liveness challenge: Blink twice within 6 seconds.'
-              : 'Liveness challenge: Turn head left then right within 6 seconds.',
+              ? 'Liveness challenge: Blink twice within 10 seconds.'
+              : 'Liveness challenge: Turn head left then right within 10 seconds.',
         }));
 
         const liveness = await runLivenessChallenge(payload.challengeType);
         if (!liveness.passed) {
-          throw new Error('Liveness challenge failed. Please retry.');
+          const reason = [liveness.reason, liveness.suggestion].filter(Boolean).join(' ');
+          throw new Error(reason || 'Liveness challenge failed. Please retry.');
         }
 
         setFaceFlow((prev) => ({ ...prev, phase: 'capturing', message: 'Capturing face descriptors...' }));
