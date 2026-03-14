@@ -58,7 +58,7 @@ const hostedFaceModelFiles = new Set([
 ]);
 const hostedFaceModelsBaseUrl =
     process.env.FACE_MODELS_SOURCE_URL ||
-    'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+    'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/v0.22.2/weights';
 const hostedFaceModelFetches = new Map();
 const hostedFaceModelExpectedSizes = {
     'tiny_face_detector_model-weights_manifest.json': 2953,
