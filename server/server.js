@@ -66,7 +66,7 @@ const hostedFaceModelExpectedSizes = {
     'face_landmark_68_model-weights_manifest.json': 7889,
     'face_landmark_68_model-shard1': 356840,
     'face_recognition_model-weights_manifest.json': 18303,
-    'face_recognition_model-shard1': 2112064,
+    'face_recognition_model-shard1': 4194304,
     'face_recognition_model-shard2': 2249728
 };
 
@@ -240,7 +240,7 @@ app.use((req, res, next) => {
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use('/models', async (req, res, next) => {
+const hostedFaceModelsHandler = async (req, res, next) => {
     const fileName = path.basename(req.path || '').trim();
     if (!hostedFaceModelFiles.has(fileName)) {
         return res.status(404).json({ success: false, message: 'Model file not found' });
@@ -260,7 +260,10 @@ app.use('/models', async (req, res, next) => {
             file: fileName,
         });
     }
-});
+};
+
+app.use('/models', hostedFaceModelsHandler);
+app.use('/models-v2', hostedFaceModelsHandler);
 
 // Logging middleware
 app.use((req, res, next) => {
