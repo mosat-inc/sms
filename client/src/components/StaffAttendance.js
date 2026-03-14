@@ -358,6 +358,8 @@ const calcHours = (inAt, outAt) => {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FACE_API_SCRIPT_ID = 'face-api-js-runtime';
+const DEFAULT_FACE_API_SCRIPT = '/vendor/face-api.min.js';
+const DEFAULT_FACE_MODELS_URI = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
 
 const StaffAttendance = () => {
   const { api, user } = useAuth();
@@ -384,8 +386,8 @@ const StaffAttendance = () => {
   const faceApiRef = useRef(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const modelUri = process.env.REACT_APP_FACE_MODELS_URI || '/models';
-  const faceApiCdn = process.env.REACT_APP_FACE_API_CDN || 'https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js';
+  const modelUri = process.env.REACT_APP_FACE_MODELS_URI || DEFAULT_FACE_MODELS_URI;
+  const faceApiCdn = process.env.REACT_APP_FACE_API_CDN || DEFAULT_FACE_API_SCRIPT;
 
   const fetchMe = useCallback(async () => {
     try {
