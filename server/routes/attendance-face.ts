@@ -198,6 +198,35 @@ async function ensureFaceAttendanceSchema(conn: PoolConnection): Promise<void> {
 }
 
 async function resolveOrgId(conn: PoolConnection, req: AuthenticatedRequest, targetUserId?: number): Promise<number> {
+  const getSingleSchoolId = async (activeOnly: boolean) => {
+    const query = activeOnly
+      ? 'SELECT id FROM schools WHERE is_active = 1 ORDER BY id ASC LIMIT 2'
+      : 'SELECT id FROM schools ORDER BY id ASC LIMIT 2';
+    const [schoolRows] = await conn.execute<RowDataPacket[]>(query);
+    if (schoolRows.length === 1) {
+      return Number(schoolRows[0].id);
+    }
+    return 0;
+  };
+
+  const ensureFallbackSchool = async () => {
+    const fallbackCode = String(process.env.DEFAULT_SCHOOL_CODE || 'DEFAULT').trim().slice(0, 20) || 'DEFAULT';
+    const fallbackName = String(process.env.DEFAULT_SCHOOL_NAME || 'Default School').trim().slice(0, 255) || 'Default School';
+
+    await conn.execute<ResultSetHeader>(
+      `INSERT INTO schools (school_code, name, is_active)
+       SELECT ?, ?, 1
+       WHERE NOT EXISTS (SELECT 1 FROM schools LIMIT 1)`,
+      [fallbackCode, fallbackName]
+    );
+
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      'SELECT id FROM schools ORDER BY id ASC LIMIT 1'
+    );
+
+    return Number(rows?.[0]?.id || 0);
+  };
+
   const candidateIds: number[] = [];
 
   if (req.user?.schoolId && Number(req.user.schoolId) > 0) {
@@ -222,15 +251,22 @@ async function resolveOrgId(conn: PoolConnection, req: AuthenticatedRequest, tar
     if (orgId > 0) return orgId;
   }
 
-  const [schoolRows] = await conn.execute<RowDataPacket[]>(
-    'SELECT id FROM schools WHERE is_active = 1 ORDER BY id ASC LIMIT 2'
-  );
-
-  if (schoolRows.length === 1) {
-    return Number(schoolRows[0].id);
+  const activeSchoolId = await getSingleSchoolId(true);
+  if (activeSchoolId > 0) {
+    return activeSchoolId;
   }
 
-  throw new Error('No org/school bound to current user or target staff account');
+  const anySchoolId = await getSingleSchoolId(false);
+  if (anySchoolId > 0) {
+    return anySchoolId;
+  }
+
+  const fallbackSchoolId = await ensureFallbackSchool();
+  if (fallbackSchoolId > 0) {
+    return fallbackSchoolId;
+  }
+
+  throw new Error('No org/school bound to current user or target staff account, and no fallback school could be created');
 }
 
 async function guardRateLimit(conn: PoolConnection, userId: number, orgId: number): Promise<void> {
