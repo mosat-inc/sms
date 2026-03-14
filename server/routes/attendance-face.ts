@@ -47,6 +47,17 @@ const startSchema = z.object({
   userId: z.coerce.number().int().positive(),
 });
 
+const templateStatusSchema = z.object({
+  userId: z.coerce.number().int().positive().optional(),
+});
+
+const enrollSchema = z.object({
+  userId: z.coerce.number().int().positive(),
+  descriptors: z.array(
+    z.array(z.number().finite()).min(64).max(2048)
+  ).min(5).max(20),
+});
+
 const completeSchema = z.object({
   sessionId: z.string().uuid(),
   userId: z.coerce.number().int().positive(),
@@ -297,6 +308,164 @@ async function guardRateLimit(conn: PoolConnection, userId: number, orgId: numbe
   }
 }
 
+async function getTargetStaffUser(conn: PoolConnection, userId: number) {
+  const [userRows] = await conn.execute<RowDataPacket[]>(
+    `SELECT id, role, school_id
+     FROM users
+     WHERE id = ?
+       AND is_active = 1
+     LIMIT 1`,
+    [userId]
+  );
+
+  if (!userRows.length) {
+    return null;
+  }
+
+  return userRows[0];
+}
+
+async function ensureTargetStaffUser(conn: PoolConnection, userId: number, orgId: number, res: Response): Promise<RowDataPacket | null> {
+  const targetUser = await getTargetStaffUser(conn, userId);
+
+  if (!targetUser) {
+    sendError(res, 404, 'NOT_FOUND', 'User not found');
+    return null;
+  }
+
+  const targetSchoolId = Number(targetUser.school_id || 0);
+  if (targetSchoolId > 0 && targetSchoolId !== orgId) {
+    sendError(res, 404, 'NOT_FOUND', 'User not found in this organization');
+    return null;
+  }
+
+  if (!['teacher', 'admin'].includes(String(targetUser.role || ''))) {
+    sendError(res, 403, 'FORBIDDEN', 'Face attendance is only available for staff accounts');
+    return null;
+  }
+
+  return targetUser;
+}
+
+router.get('/template-status', Auth.authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const parsed = templateStatusSchema.safeParse(req.query || {});
+  if (!parsed.success) {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid request payload', formatZodIssues(parsed.error));
+  }
+
+  if (!req.user?.id) {
+    return sendError(res, 401, 'UNAUTHORIZED', 'Authentication required');
+  }
+
+  const targetUserId = parsed.data.userId ?? Number(req.user.id);
+
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await pool.getConnection();
+    await ensureFaceAttendanceSchema(conn);
+
+    const orgId = await resolveOrgId(conn, req, targetUserId);
+    const targetUser = await ensureTargetStaffUser(conn, targetUserId, orgId, res);
+    if (!targetUser) return;
+
+    const [templateRows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id, created_at
+       FROM face_templates
+       WHERE user_id = ? AND org_id = ? AND revoked_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [targetUserId, orgId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        userId: targetUserId,
+        orgId,
+        enrolled: templateRows.length > 0,
+        templateId: templateRows[0]?.id ?? null,
+        enrolledAt: templateRows[0]?.created_at ?? null,
+      },
+    });
+  } catch (error: any) {
+    if (error?.apiCode === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', error.message, error?.details);
+    }
+
+    console.error('Face template status error:', error);
+    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to load face template status', {
+      reason: error?.message || 'Unknown error',
+    });
+  } finally {
+    conn?.release();
+  }
+});
+
+router.post('/enroll', Auth.authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const parsed = enrollSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid request payload', formatZodIssues(parsed.error));
+  }
+
+  if (!req.user?.id) {
+    return sendError(res, 401, 'UNAUTHORIZED', 'Authentication required');
+  }
+
+  const payload = parsed.data;
+
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await pool.getConnection();
+    await ensureFaceAttendanceSchema(conn);
+    await conn.beginTransaction();
+
+    const orgId = await resolveOrgId(conn, req, payload.userId);
+    const targetUser = await ensureTargetStaffUser(conn, payload.userId, orgId, res);
+    if (!targetUser) {
+      await conn.rollback();
+      return;
+    }
+
+    await conn.execute<ResultSetHeader>(
+      `UPDATE face_templates
+       SET revoked_at = NOW()
+       WHERE user_id = ? AND org_id = ? AND revoked_at IS NULL`,
+      [payload.userId, orgId]
+    );
+
+    const [insertResult] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO face_templates (user_id, org_id, descriptor_json)
+       VALUES (?, ?, ?)`,
+      [payload.userId, orgId, JSON.stringify(payload.descriptors)]
+    );
+
+    await conn.commit();
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        enrolled: true,
+        templateId: insertResult.insertId,
+        userId: payload.userId,
+        orgId,
+      },
+    });
+  } catch (error: any) {
+    if (conn) await conn.rollback();
+
+    if (error?.apiCode === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', error.message, error?.details);
+    }
+
+    console.error('Face enrollment error:', error);
+    return sendError(res, 500, 'INTERNAL_ERROR', 'Failed to enroll face template', {
+      reason: error?.message || 'Unknown error',
+    });
+  } finally {
+    conn?.release();
+  }
+});
+
 router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const parsed = startSchema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -319,30 +488,10 @@ router.post('/start', Auth.authenticateToken, async (req: AuthenticatedRequest, 
 
     await guardRateLimit(conn, userId, orgId);
 
-    const [userRows] = await conn.execute<RowDataPacket[]>(
-      `SELECT id, role, school_id
-       FROM users
-       WHERE id = ?
-         AND is_active = 1
-       LIMIT 1`,
-      [userId]
-    );
-
-    if (!userRows.length) {
+    const targetUser = await ensureTargetStaffUser(conn, userId, orgId, res);
+    if (!targetUser) {
       await conn.rollback();
-      return sendError(res, 404, 'NOT_FOUND', 'User not found');
-    }
-
-    const targetUser = userRows[0];
-    const targetSchoolId = Number(targetUser.school_id || 0);
-    if (targetSchoolId > 0 && targetSchoolId !== orgId) {
-      await conn.rollback();
-      return sendError(res, 404, 'NOT_FOUND', 'User not found in this organization');
-    }
-
-    if (!['teacher', 'admin'].includes(String(targetUser.role || ''))) {
-      await conn.rollback();
-      return sendError(res, 403, 'FORBIDDEN', 'Face attendance is only available for staff accounts');
+      return;
     }
 
     const challenge = randomChallenge();

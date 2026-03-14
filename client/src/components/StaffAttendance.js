@@ -385,10 +385,16 @@ const StaffAttendance = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [faceTemplateStatus, setFaceTemplateStatus] = useState({
+    loading: true,
+    enrolled: false,
+    templateId: null,
+  });
 
   const [faceFlow, setFaceFlow] = useState({
     open: false,
     phase: 'idle',
+    mode: 'attendance',
     message: '',
     error: '',
     sessionId: '',
@@ -423,6 +429,29 @@ const StaffAttendance = () => {
   useEffect(() => {
     fetchMe();
   }, [fetchMe]);
+
+  const fetchFaceTemplateStatus = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      setFaceTemplateStatus((prev) => ({ ...prev, loading: true }));
+      const res = await api.get('/api/attendance/face/template-status', {
+        params: { userId: Number(user.id) },
+      });
+      const data = res?.data?.data || {};
+      setFaceTemplateStatus({
+        loading: false,
+        enrolled: Boolean(data.enrolled),
+        templateId: data.templateId || null,
+      });
+    } catch (_error) {
+      setFaceTemplateStatus((prev) => ({ ...prev, loading: false }));
+    }
+  }, [api, user?.id]);
+
+  useEffect(() => {
+    fetchFaceTemplateStatus();
+  }, [fetchFaceTemplateStatus]);
 
   const bySession = useMemo(() => {
     const map = new Map(rows.map((r) => [r.session, r]));
@@ -704,14 +733,14 @@ const StaffAttendance = () => {
     [setFaceMessage]
   );
 
-  const captureDescriptors = useCallback(async () => {
+  const captureDescriptors = useCallback(async (count = 5, intervalMs = 400) => {
     const faceapi = faceApiRef.current;
     if (!faceapi || !videoRef.current) throw new Error('Capture not ready');
 
     const detectorOpts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
     const descriptors = [];
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < count; i += 1) {
       const allFaces = await faceapi
         .detectAllFaces(videoRef.current, detectorOpts)
         .withFaceLandmarks()
@@ -722,7 +751,7 @@ const StaffAttendance = () => {
       }
 
       descriptors.push(Array.from(allFaces[0].descriptor));
-      await wait(400);
+      await wait(intervalMs);
     }
 
     return descriptors;
@@ -745,6 +774,7 @@ const StaffAttendance = () => {
     setFaceFlow({
       open: false,
       phase: 'idle',
+      mode: 'attendance',
       message: '',
       error: '',
       sessionId: '',
@@ -757,9 +787,14 @@ const StaffAttendance = () => {
   const runFaceAttendance = useCallback(
     async (session) => {
       try {
+        if (!faceTemplateStatus.enrolled) {
+          throw new Error('No enrolled face template found. Enroll your face once before using face attendance.');
+        }
+
         setFaceFlow({
           open: true,
           phase: 'starting',
+          mode: 'attendance',
           message: 'Starting face attendance session...',
           error: '',
           sessionId: '',
@@ -834,6 +869,14 @@ const StaffAttendance = () => {
         stopCamera();
         await fetchMe();
       } catch (error) {
+        const noTemplate =
+          error?.response?.data?.error?.message === 'No enrolled face template found' ||
+          String(error?.message || '').includes('No enrolled face template found');
+
+        if (noTemplate) {
+          setFaceTemplateStatus((prev) => ({ ...prev, enrolled: false, templateId: null }));
+        }
+
         const permissionDenied =
           error?.name === 'NotAllowedError' ||
           error?.name === 'PermissionDeniedError' ||
@@ -866,13 +909,101 @@ const StaffAttendance = () => {
       startCamera,
       stopCamera,
       user?.id,
+      faceTemplateStatus.enrolled,
     ]
   );
 
+  const runFaceEnrollment = useCallback(async () => {
+    try {
+      setFaceFlow({
+        open: true,
+        phase: 'loading_models',
+        mode: 'enrollment',
+        message: 'Loading face models for enrollment...',
+        error: '',
+        sessionId: '',
+        challengeType: 'BLINK_2X',
+        challengeParams: null,
+        session: 'morning',
+      });
+
+      await loadModelsOnDemand();
+
+      setFaceFlow((prev) => ({ ...prev, phase: 'camera', message: 'Requesting camera permission...' }));
+      await startCamera();
+
+      setFaceFlow((prev) => ({
+        ...prev,
+        phase: 'liveness',
+        message: 'Enrollment liveness check: Blink twice within 10 seconds.',
+      }));
+
+      const liveness = await runLivenessChallenge('BLINK_2X');
+      if (!liveness.passed) {
+        const reason = [liveness.reason, liveness.suggestion].filter(Boolean).join(' ');
+        throw new Error(reason || 'Enrollment liveness challenge failed. Please retry.');
+      }
+
+      setFaceFlow((prev) => ({
+        ...prev,
+        phase: 'capturing',
+        message: 'Capturing enrollment descriptors. Slowly turn your head slightly while facing the camera.',
+      }));
+
+      const descriptors = await captureDescriptors(10, 250);
+
+      setFaceFlow((prev) => ({ ...prev, phase: 'verifying', message: 'Saving your enrolled face...' }));
+
+      const enrollRes = await api.post('/api/attendance/face/enroll', {
+        userId: Number(user?.id),
+        descriptors,
+      });
+
+      if (!enrollRes?.data?.success) {
+        throw new Error('Face enrollment failed.');
+      }
+
+      setFaceTemplateStatus({
+        loading: false,
+        enrolled: true,
+        templateId: enrollRes?.data?.data?.templateId || null,
+      });
+
+      setFaceFlow((prev) => ({
+        ...prev,
+        phase: 'success',
+        message: 'Face enrolled successfully. You can now use face attendance.',
+      }));
+
+      toast.success('Face enrolled successfully.');
+      stopCamera();
+    } catch (error) {
+      const permissionDenied =
+        error?.name === 'NotAllowedError' ||
+        error?.name === 'PermissionDeniedError' ||
+        String(error?.message || '').toLowerCase().includes('permission');
+
+      const message = permissionDenied
+        ? 'Camera permission denied. Please allow camera access and retry enrollment.'
+        : error?.response?.data?.error?.message ||
+          error?.response?.data?.message ||
+          error?.message ||
+          'Face enrollment failed.';
+
+      setFaceFlow((prev) => ({ ...prev, phase: 'failed', error: message, message: '' }));
+      stopCamera();
+      toast.error(message);
+    }
+  }, [api, captureDescriptors, loadModelsOnDemand, runLivenessChallenge, startCamera, stopCamera, user?.id]);
+
   const retryFaceFlow = useCallback(() => {
+    if (faceFlow.mode === 'enrollment') {
+      runFaceEnrollment();
+      return;
+    }
     const session = faceFlow.session || 'morning';
     runFaceAttendance(session);
-  }, [faceFlow.session, runFaceAttendance]);
+  }, [faceFlow.mode, faceFlow.session, runFaceAttendance, runFaceEnrollment]);
 
   const overallStatus = useMemo(() => {
     const statuses = [bySession.morning?.status, bySession.afternoon?.status].filter(Boolean);
@@ -1013,11 +1144,35 @@ const StaffAttendance = () => {
             <SecondaryButton onClick={fetchMe} disabled={loading} style={{ borderRadius: 12 }}>
               <FaSyncAlt /> Refresh
             </SecondaryButton>
-            <TakeButton type="button" onClick={() => runFaceAttendance(nextFaceSession)}>
+            {!faceTemplateStatus.loading && !faceTemplateStatus.enrolled && (
+              <SecondaryButton type="button" onClick={runFaceEnrollment} style={{ borderRadius: 12 }}>
+                <FaFingerprint /> Enroll Face
+              </SecondaryButton>
+            )}
+            <TakeButton
+              type="button"
+              onClick={() => runFaceAttendance(nextFaceSession)}
+              disabled={faceTemplateStatus.loading || !faceTemplateStatus.enrolled}
+              style={{
+                opacity: faceTemplateStatus.loading || !faceTemplateStatus.enrolled ? 0.6 : 1,
+                cursor: faceTemplateStatus.loading || !faceTemplateStatus.enrolled ? 'not-allowed' : 'pointer',
+              }}
+              title={
+                faceTemplateStatus.enrolled
+                  ? 'Mark attendance with enrolled face'
+                  : 'Enroll your face once before using face attendance'
+              }
+            >
               <FaFingerprint /> Take Attendance
             </TakeButton>
           </div>
         </TableFooter>
+
+        {!faceTemplateStatus.loading && !faceTemplateStatus.enrolled && (
+          <FaceStateBadge $state="running">
+            Face enrollment required. Enroll once, then the enroll button will disappear and face attendance will be enabled.
+          </FaceStateBadge>
+        )}
 
         {(faceResultBySession.morning || faceResultBySession.afternoon) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1040,9 +1195,14 @@ const StaffAttendance = () => {
           <FaceModalCard>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
-                <h3 style={{ margin: 0 }}>Face Attendance</h3>
+                <h3 style={{ margin: 0 }}>{faceFlow.mode === 'enrollment' ? 'Face Enrollment' : 'Face Attendance'}</h3>
                 <div style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
-                  Session: <strong>{faceFlow.session}</strong> • Challenge: <strong>{faceFlow.challengeType || 'starting...'}</strong>
+                  {faceFlow.mode === 'attendance' && (
+                    <>
+                      Session: <strong>{faceFlow.session}</strong> •{' '}
+                    </>
+                  )}
+                  Challenge: <strong>{faceFlow.challengeType || 'starting...'}</strong>
                 </div>
               </div>
               <SecondaryButton onClick={closeFaceFlow} type="button">
