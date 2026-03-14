@@ -59,6 +59,7 @@ const hostedFaceModelFiles = new Set([
 const hostedFaceModelsBaseUrl =
     process.env.FACE_MODELS_SOURCE_URL ||
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+const hostedFaceModelFetches = new Map();
 const hostedFaceModelExpectedSizes = {
     'tiny_face_detector_model-weights_manifest.json': 2953,
     'tiny_face_detector_model-shard1': 193321,
@@ -78,6 +79,61 @@ const hasValidHostedFaceModelFile = (filePath, fileName) => {
         return stats.size === expectedSize;
     } catch (_error) {
         return false;
+    }
+};
+
+const ensureHostedFaceModelFile = async (fileName) => {
+    const localPath = path.join(hostedFaceModelsDir, fileName);
+    if (hasValidHostedFaceModelFile(localPath, fileName)) {
+        return localPath;
+    }
+
+    if (hostedFaceModelFetches.has(fileName)) {
+        return hostedFaceModelFetches.get(fileName);
+    }
+
+    const fetchPromise = (async () => {
+        fs.mkdirSync(hostedFaceModelsDir, { recursive: true });
+        if (fs.existsSync(localPath)) {
+            fs.unlinkSync(localPath);
+        }
+
+        const remoteUrl = `${hostedFaceModelsBaseUrl.replace(/\/$/, '')}/${fileName}`;
+        const response = await axios.get(remoteUrl, {
+            responseType: 'arraybuffer',
+            timeout: 300000,
+            validateStatus: (status) => status >= 200 && status < 300,
+        });
+
+        const buffer = Buffer.from(response.data);
+        const expectedSize = hostedFaceModelExpectedSizes[fileName];
+        if (expectedSize && buffer.length !== expectedSize) {
+            throw new Error(`Fetched model file has unexpected size for ${fileName}: expected ${expectedSize}, got ${buffer.length}`);
+        }
+
+        const tempPath = `${localPath}.tmp`;
+        fs.writeFileSync(tempPath, buffer);
+        fs.renameSync(tempPath, localPath);
+        return localPath;
+    })();
+
+    hostedFaceModelFetches.set(fileName, fetchPromise);
+
+    try {
+        return await fetchPromise;
+    } finally {
+        hostedFaceModelFetches.delete(fileName);
+    }
+};
+
+const warmHostedFaceModelFiles = async () => {
+    for (const fileName of hostedFaceModelFiles) {
+        try {
+            await ensureHostedFaceModelFile(fileName);
+            logger.info(`Hosted face model ready: ${fileName}`);
+        } catch (error) {
+            logger.warn(`Hosted face model warmup failed for ${fileName}: ${error.message}`);
+        }
     }
 };
 
@@ -190,38 +246,9 @@ app.use('/models', async (req, res, next) => {
         return res.status(404).json({ success: false, message: 'Model file not found' });
     }
 
-    const localPath = path.join(hostedFaceModelsDir, fileName);
-    if (hasValidHostedFaceModelFile(localPath, fileName)) {
-        return res.sendFile(localPath);
-    }
-
     try {
-        fs.mkdirSync(hostedFaceModelsDir, { recursive: true });
-        if (fs.existsSync(localPath)) {
-            fs.unlinkSync(localPath);
-        }
-        const remoteUrl = `${hostedFaceModelsBaseUrl.replace(/\/$/, '')}/${fileName}`;
-        const response = await axios.get(remoteUrl, {
-            responseType: 'arraybuffer',
-            timeout: 60000,
-            validateStatus: (status) => status >= 200 && status < 300,
-        });
-
-        const buffer = Buffer.from(response.data);
-        const expectedSize = hostedFaceModelExpectedSizes[fileName];
-        if (expectedSize && buffer.length !== expectedSize) {
-            throw new Error(`Fetched model file has unexpected size for ${fileName}: expected ${expectedSize}, got ${buffer.length}`);
-        }
-
-        const tempPath = `${localPath}.tmp`;
-        fs.writeFileSync(tempPath, buffer);
-        fs.renameSync(tempPath, localPath);
-        if (fileName.endsWith('.json')) {
-            res.type('application/json');
-        } else {
-            res.type('application/octet-stream');
-        }
-        return res.send(buffer);
+        const localPath = await ensureHostedFaceModelFile(fileName);
+        return res.sendFile(localPath);
     } catch (error) {
         logger.error('Failed to fetch hosted face model', {
             fileName,
@@ -429,6 +456,14 @@ const startServer = async () => {
                 logger.info('   • OTP codes are displayed in console for development');
                 logger.info('\nPress Ctrl+C to stop the server');
                 logger.info('═══════════════════════════════════════════════\n');
+
+                // Warm the hosted face model files after startup so users do not
+                // wait on the largest shard during the first attendance attempt.
+                setImmediate(() => {
+                    warmHostedFaceModelFiles().catch((error) => {
+                        logger.warn(`Hosted face model warmup task failed: ${error.message}`);
+                    });
+                });
             });
 
             server.on('error', (err) => {
