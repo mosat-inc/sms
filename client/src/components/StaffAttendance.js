@@ -104,7 +104,7 @@ const SummaryRow = styled.div`
 const SummaryCard = styled(Card)`
   background: rgba(255, 255, 255, 0.67);
   border: 1px solid rgba(130, 147, 195, 0.24);
-  border-radius: 24px;
+  border-radius: 0;
   padding: 18px 20px;
   box-shadow: 0 16px 30px rgba(84, 103, 156, 0.12);
   display: flex;
@@ -164,7 +164,7 @@ const StatusIconWrap = styled.div`
 const RecordsCard = styled(Card)`
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(132, 150, 194, 0.26);
-  border-radius: 28px;
+  border-radius: 0;
   padding: 18px;
   box-shadow: 0 18px 36px rgba(96, 113, 168, 0.15);
   display: grid;
@@ -299,7 +299,7 @@ const FaceModalBackdrop = styled.div`
 const FaceModalCard = styled(Card)`
   width: 100%;
   max-width: 780px;
-  border-radius: ${borderRadius.large};
+  border-radius: 0;
   padding: 16px;
   display: grid;
   gap: 12px;
