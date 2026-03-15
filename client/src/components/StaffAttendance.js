@@ -45,19 +45,19 @@ const TitleWrap = styled.div`
 const PageTitle = styled.h1`
   margin: 0;
   color: #2f3f74;
-  font-size: clamp(30px, 4.2vw, 44px);
-  line-height: 1;
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.05;
   letter-spacing: -0.02em;
 `;
 
 const SubTitle = styled.p`
   margin: 0;
   color: #506093;
-  font-size: 31px;
+  font-size: clamp(14px, 1.8vw, 18px);
   font-weight: 500;
   letter-spacing: 0.01em;
   ${mediaQuery('mobile')} {
-    font-size: 20px;
+    font-size: 14px;
   }
 `;
 
@@ -84,7 +84,7 @@ const SearchInput = styled.input`
   outline: none;
   width: 100%;
   color: #455684;
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 500;
   &::placeholder {
     color: #7d8eb7;
@@ -120,13 +120,13 @@ const SummaryMeta = styled.div`
 const SummaryLabel = styled.div`
   color: #415588;
   font-weight: 700;
-  font-size: 20px;
+  font-size: 15px;
 `;
 
 const SummaryValue = styled.div`
   color: #2c3d71;
-  font-size: 44px;
-  line-height: 1;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.05;
   font-weight: 800;
 `;
 
@@ -135,19 +135,19 @@ const SummarySub = styled.div`
   align-items: center;
   gap: 8px;
   color: #516292;
-  font-size: 29px;
+  font-size: 16px;
 `;
 
 const StatusText = styled.div`
   color: ${(p) => (p.$status === 'absent' ? '#d86176' : '#3c9d67')};
-  font-size: 44px;
-  line-height: 1;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.05;
   font-weight: 800;
 `;
 
 const StatusPercent = styled.div`
   color: #7d8eb7;
-  font-size: 31px;
+  font-size: 16px;
 `;
 
 const StatusIconWrap = styled.div`
@@ -158,7 +158,7 @@ const StatusIconWrap = styled.div`
   display: grid;
   place-items: center;
   color: #d86176;
-  font-size: 36px;
+  font-size: 28px;
 `;
 
 const RecordsCard = styled(Card)`
@@ -179,7 +179,7 @@ const RecordsHeader = styled.div`
 const RecordsTitle = styled.h2`
   margin: 0;
   color: #2f4275;
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
 `;
 
@@ -194,7 +194,7 @@ const FilterPill = styled.button`
   padding: 10px 14px;
   width: fit-content;
   min-width: 230px;
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 600;
 `;
 
@@ -212,7 +212,7 @@ const RecordsTable = styled.table`
     text-align: left;
     padding: 12px 14px;
     background: rgba(232, 237, 255, 0.95);
-    font-size: 18px;
+    font-size: 14px;
     color: #405488;
     font-weight: 700;
     border-bottom: 1px solid rgba(178, 192, 229, 0.28);
@@ -226,7 +226,7 @@ const RecordsTable = styled.table`
   td {
     padding: 12px 14px;
     border-bottom: 1px solid rgba(177, 191, 227, 0.3);
-    font-size: 18px;
+    font-size: 14px;
     color: #3b4f82;
   }
 `;
@@ -267,7 +267,7 @@ const TableFooter = styled.div`
   gap: 10px;
   flex-wrap: wrap;
   color: #6173a5;
-  font-size: 18px;
+  font-size: 14px;
 `;
 
 const TakeButton = styled.button`
@@ -279,7 +279,7 @@ const TakeButton = styled.button`
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 700;
   box-shadow: 0 10px 20px rgba(84, 108, 188, 0.24);
   cursor: pointer;
