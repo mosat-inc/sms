@@ -120,12 +120,12 @@ const SummaryMeta = styled.div`
 const SummaryLabel = styled.div`
   color: #415588;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 13px;
 `;
 
 const SummaryValue = styled.div`
   color: #2c3d71;
-  font-size: clamp(28px, 3vw, 36px);
+  font-size: clamp(20px, 2.2vw, 26px);
   line-height: 1.05;
   font-weight: 800;
 `;
@@ -135,19 +135,19 @@ const SummarySub = styled.div`
   align-items: center;
   gap: 8px;
   color: #516292;
-  font-size: 16px;
+  font-size: 13px;
 `;
 
 const StatusText = styled.div`
   color: ${(p) => (p.$status === 'absent' ? '#d86176' : '#3c9d67')};
-  font-size: clamp(28px, 3vw, 36px);
+  font-size: clamp(20px, 2.2vw, 26px);
   line-height: 1.05;
   font-weight: 800;
 `;
 
 const StatusPercent = styled.div`
   color: #7d8eb7;
-  font-size: 16px;
+  font-size: 13px;
 `;
 
 const StatusIconWrap = styled.div`
