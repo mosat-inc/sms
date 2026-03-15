@@ -32,7 +32,7 @@ const Container = styled(PageContainer)`
 const Hero = styled.div`
   position: relative;
   overflow: hidden;
-  border-radius: ${borderRadius.large};
+  border-radius: 0;
   padding: 26px 26px;
   background: linear-gradient(135deg, rgba(30, 58, 138, 0.92) 0%, rgba(88, 28, 135, 0.92) 100%);
   color: #fff;
@@ -139,7 +139,7 @@ const SummaryGrid = styled.div`
 
 const SummaryCard = styled(Card)`
   padding: 16px 16px;
-  border-radius: ${borderRadius.large};
+  border-radius: 0;
   overflow: hidden;
   position: relative;
 
@@ -205,7 +205,7 @@ const ShowcaseGrid = styled.div`
 
 const ShowcaseTile = styled(Card)`
   padding: 16px;
-  border-radius: ${borderRadius.large};
+  border-radius: 0;
   overflow: hidden;
   position: relative;
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.06);
@@ -294,7 +294,7 @@ const ClassCard = styled(Card)`
   }
 
   cursor: pointer;
-  border-radius: ${borderRadius.large};
+  border-radius: 0;
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 
   &::after {
