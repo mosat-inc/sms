@@ -196,22 +196,34 @@ router.get('/assessments/my-assessments',
 );
 
 // Get specific assessment with students for grading (called from GradesMenu)
-router.get('/assessments/:id',
+router.get('/assessments/:id(\\d+)',
     Auth.authenticateToken,
     asyncHandler(async (req, res) => {
         try {
             const assessment_id = req.params.id;
             const teacher_id = req.user.id;
+            const schemaMeta = await getAssessmentsSchemaMeta();
+            const titleColumn = schemaMeta.fields.has('title') ? 'a.title' : 'a.assessment_name';
+            const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
+            const totalMarksColumn = schemaMeta.fields.has('total_marks') ? 'a.total_marks' : 'a.max_marks';
+            const gradingScaleSelect = schemaMeta.fields.has('grading_scale_id')
+                ? 'gs.name as grading_scale_name'
+                : 'NULL as grading_scale_name';
+            const gradingScaleJoin = schemaMeta.fields.has('grading_scale_id')
+                ? 'LEFT JOIN grading_scales gs ON a.grading_scale_id = gs.id'
+                : '';
             
             // Get assessment details
             const [assessments] = await pool.execute(`
-                SELECT a.*, s.name as subject_name, s.code as subject_code,
+                SELECT a.*, ${titleColumn} as display_title, ${typeColumn} as display_type,
+                       ${totalMarksColumn} as display_total_marks,
+                       s.name as subject_name, s.code as subject_code,
                        c.name as class_name, c.level as class_level,
-                       gs.name as grading_scale_name
+                       ${gradingScaleSelect}
                 FROM assessments a
                 INNER JOIN subjects s ON a.subject_id = s.id
                 INNER JOIN classes c ON a.class_id = c.id
-                LEFT JOIN grading_scales gs ON a.grading_scale_id = gs.id
+                ${gradingScaleJoin}
                 WHERE a.id = ? AND (a.teacher_id = ? OR ? = 'admin')
             `, [assessment_id, teacher_id, req.user.role]);
             
@@ -219,8 +231,12 @@ router.get('/assessments/:id',
                 throw new NotFoundError('Assessment not found or access denied');
             }
             
-            const schemaMeta = await getAssessmentsSchemaMeta();
-            const assessment = normalizeAssessmentRecord(assessments[0], schemaMeta);
+            const assessment = normalizeAssessmentRecord({
+                ...assessments[0],
+                title: assessments[0].display_title,
+                assessment_type: assessments[0].display_type,
+                total_marks: assessments[0].display_total_marks,
+            }, schemaMeta);
             
             // Get students and their grades
             const [studentGrades] = await pool.execute(`
