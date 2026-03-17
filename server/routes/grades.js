@@ -192,9 +192,11 @@ router.get('/assessments/my-assessments',
             const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
             const subject_id = req.query.subject_id;
             const class_id = req.query.class_id;
+            const resultBucket = String(req.query.result_bucket || '').toLowerCase();
             const publishedOnly = String(req.query.published_only || '').toLowerCase() === 'true';
             const unpublishedOnly = String(req.query.unpublished_only || '').toLowerCase() === 'true';
             const schemaMeta = await getAssessmentsSchemaMeta();
+            const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
             
             let query = `
                 SELECT a.*, s.name as subject_name, s.code as subject_code,
@@ -224,6 +226,14 @@ router.get('/assessments/my-assessments',
             if (class_id) {
                 query += ' AND a.class_id = ?';
                 params.push(class_id);
+            }
+
+            if (resultBucket === 'terminal') {
+                query += ` AND LOWER(COALESCE(${typeColumn}, '')) = 'terminal exams'`;
+            } else if (resultBucket === 'annual') {
+                query += ` AND LOWER(COALESCE(${typeColumn}, '')) = 'annual exams'`;
+            } else if (resultBucket === 'assessment') {
+                query += ` AND LOWER(COALESCE(${typeColumn}, '')) NOT IN ('terminal exams', 'annual exams')`;
             }
 
             if (publishedOnly) {

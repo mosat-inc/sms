@@ -4,7 +4,7 @@ import {
     FaGraduationCap, FaPlus, FaEdit, FaEye, FaChartBar, FaDownload, 
     FaCalendarAlt, FaFilter, FaSearch, FaUsers, FaTasks, FaCheckCircle,
     FaExclamationTriangle, FaFileAlt, FaCog, FaSort, FaSave, FaTrash,
-    FaFilePdf,
+    FaFilePdf, FaArrowLeft,
     FaInfoCircle
 } from 'react-icons/fa';
 import { toast } from 'react-toastify';
@@ -305,6 +305,44 @@ const AssessmentCard = styled.div`
         }
       }
     }
+  }
+`;
+
+const ResultsTypeGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+`;
+
+const ResultsTypeCard = styled.button`
+  background: var(--grades-surface);
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: var(--grades-shadow-raised);
+  padding: 24px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.25s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: -12px -12px 28px rgba(255, 255, 255, 0.98), 12px 12px 28px rgba(148, 163, 184, 0.28);
+    border-color: rgba(37, 99, 235, 0.35);
+  }
+
+  h3 {
+    margin: 0 0 8px;
+    color: ${colors.textPrimary};
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: var(--font-display);
+  }
+
+  p {
+    margin: 0;
+    color: ${colors.textSecondary};
+    font-size: 0.88rem;
+    line-height: 1.5;
   }
 `;
 
@@ -683,6 +721,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
     start_date: '',
     end_date: ''
   });
+  const [resultsCategory, setResultsCategory] = useState('');
   
   // State for student grade analysis table
   const [studentGradeAnalysis, setStudentGradeAnalysis] = useState(null);
@@ -690,6 +729,23 @@ const GradesMenu = ({ mode = 'grades' }) => {
   const [gradeAnalysisError, setGradeAnalysisError] = useState(null);
   
   const examTypes = ['mid-term exams', 'terminal exams', 'annual exams', 'mock exams'];
+  const resultsCategoryOptions = [
+    {
+      value: 'assessment',
+      label: 'Assessments',
+      description: 'Show approved class assessments such as mid-term, tests, quizzes, and mock exams. Terminal and annual results are excluded.'
+    },
+    {
+      value: 'terminal',
+      label: 'Terminal Results',
+      description: 'Show only approved terminal examination results.'
+    },
+    {
+      value: 'annual',
+      label: 'Annual Results',
+      description: 'Show only approved annual examination results.'
+    }
+  ];
 
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -728,6 +784,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
     setViewingResults(false);
     setViewingAnalytics(false);
     setSelectedAssessment(null);
+    setResultsCategory('');
   }, [mode]);
 
   useEffect(() => {
@@ -754,9 +811,13 @@ const GradesMenu = ({ mode = 'grades' }) => {
 
   useEffect(() => {
     if (activeTab === 'assessments') {
+      if (isResultsMode && !resultsCategory) {
+        setAssessments([]);
+        return;
+      }
       fetchAssessments();
     }
-  }, [activeTab, analyticsFilters]);
+  }, [activeTab, analyticsFilters, resultsCategory, isResultsMode]);
 
   useEffect(() => {
     if (isGradesMode && isAdmin && activeTab === 'pending-approvals') {
@@ -833,6 +894,9 @@ const GradesMenu = ({ mode = 'grades' }) => {
 
       if (isResultsMode) {
         queryParams.set('published_only', 'true');
+        if (resultsCategory) {
+          queryParams.set('result_bucket', resultsCategory);
+        }
       }
 
       console.log('Fetching assessments with filters:', analyticsFilters);
@@ -2098,9 +2162,41 @@ const GradesMenu = ({ mode = 'grades' }) => {
     setGradeAnalysisError(null);
   };
 
-  const renderAssessmentsTab = () => (
+  const renderAssessmentsTab = () => {
+    if (isResultsMode && !resultsCategory) {
+      return (
+        <ResultsTypeGrid>
+          {resultsCategoryOptions.map((option) => (
+            <ResultsTypeCard
+              key={option.value}
+              type="button"
+              onClick={() => setResultsCategory(option.value)}
+            >
+              <h3>{option.label}</h3>
+              <p>{option.description}</p>
+            </ResultsTypeCard>
+          ))}
+        </ResultsTypeGrid>
+      );
+    }
+
+    return (
     <>
       <FilterSection>
+        {isResultsMode && (
+          <div className="action-buttons" style={{ marginRight: 'auto' }}>
+            <SecondaryButton
+              type="button"
+              onClick={() => {
+                setResultsCategory('');
+                setAssessments([]);
+              }}
+            >
+              <FaArrowLeft /> Change Result Type
+            </SecondaryButton>
+          </div>
+        )}
+
         <div className="filter-group">
           <label>Class</label>
           <select
@@ -2137,20 +2233,22 @@ const GradesMenu = ({ mode = 'grades' }) => {
           </select>
         </div>
 
-        <div className="filter-group">
-          <label>Assessment Type</label>
-          <select
-            value={analyticsFilters.assessment_type}
-            onChange={(e) => setAnalyticsFilters(prev => ({ ...prev, assessment_type: e.target.value }))}
-          >
-            <option value="">All Types</option>
-            {examTypes.map(type => (
-              <option key={type} value={type}>
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isResultsMode && (
+          <div className="filter-group">
+            <label>Assessment Type</label>
+            <select
+              value={analyticsFilters.assessment_type}
+              onChange={(e) => setAnalyticsFilters(prev => ({ ...prev, assessment_type: e.target.value }))}
+            >
+              <option value="">All Types</option>
+              {examTypes.map(type => (
+                <option key={type} value={type}>
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {isGradesMode && (
           <div className="action-buttons">
@@ -2247,7 +2345,8 @@ const GradesMenu = ({ mode = 'grades' }) => {
         </AssessmentsGrid>
       )}
     </>
-  );
+    );
+  };
 
   const renderPendingApprovalsTab = () => (
     <>
