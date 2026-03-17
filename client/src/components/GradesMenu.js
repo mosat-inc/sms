@@ -863,7 +863,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
   const fetchPendingApprovals = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/grades/assessments/pending-approval?academic_year=2024-2025');
+      const response = await api.get('/api/grades/assessments/pending-approval');
       const result = response.data;
       if (result?.success) {
         setPendingApprovals(result.data || []);

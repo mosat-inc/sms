@@ -35,6 +35,45 @@ const isAssessmentPublished = (assessment, schemaMeta) => {
     return status === 'published' || status === 'closed';
 };
 
+const getCurrentAcademicYearName = async (connection) => {
+    try {
+        const [currentRows] = await connection.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_current = TRUE AND is_active = TRUE
+             ORDER BY id DESC
+             LIMIT 1`
+        );
+
+        if (currentRows?.[0]?.year_name) {
+            return currentRows[0].year_name;
+        }
+
+        const [activeRows] = await connection.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_active = TRUE
+             ORDER BY is_current DESC, id DESC
+             LIMIT 1`
+        );
+
+        if (activeRows?.[0]?.year_name) {
+            return activeRows[0].year_name;
+        }
+
+        const [anyRows] = await connection.execute(
+            `SELECT year_name
+             FROM academic_years
+             ORDER BY is_current DESC, is_active DESC, id DESC
+             LIMIT 1`
+        );
+
+        return anyRows?.[0]?.year_name || '2024-2025';
+    } catch (_error) {
+        return '2024-2025';
+    }
+};
+
 // Validation schemas
 const createAssessmentSchema = Joi.object({
     class_id: Joi.number().integer().positive().required(),
@@ -406,11 +445,7 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
             });
         }
 
-        // Get current academic year
-        const [currentYear] = await connection.execute(
-            'SELECT year_name FROM academic_years WHERE is_current = TRUE LIMIT 1'
-        );
-        const academicYear = currentYear.length > 0 ? currentYear[0].year_name : '2024-2025';
+        const academicYear = await getCurrentAcademicYearName(connection);
 
         // Create assessment
         const [result] = await connection.execute(`

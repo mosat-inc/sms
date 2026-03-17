@@ -33,6 +33,45 @@ const normalizeAssessmentRecord = (assessment, schemaMeta) => ({
         : ['published', 'closed'].includes(String(assessment.status || '').toLowerCase()),
 });
 
+const getCurrentAcademicYearName = async () => {
+    try {
+        const [currentRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_current = TRUE AND is_active = TRUE
+             ORDER BY id DESC
+             LIMIT 1`
+        );
+
+        if (currentRows?.[0]?.year_name) {
+            return currentRows[0].year_name;
+        }
+
+        const [activeRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_active = TRUE
+             ORDER BY is_current DESC, id DESC
+             LIMIT 1`
+        );
+
+        if (activeRows?.[0]?.year_name) {
+            return activeRows[0].year_name;
+        }
+
+        const [anyRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             ORDER BY is_current DESC, is_active DESC, id DESC
+             LIMIT 1`
+        );
+
+        return anyRows?.[0]?.year_name || '2024-2025';
+    } catch (_error) {
+        return '2024-2025';
+    }
+};
+
 // ==================== ASSESSMENTS ENDPOINTS ====================
 
 // Create new assessment
@@ -47,7 +86,7 @@ router.post('/assessments',
             } = req.body;
             
             const teacher_id = req.user.id;
-            const academic_year = req.query.academic_year || '2024-2025';
+            const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
             
             // Verify teacher has access to this subject and class
             const [accessCheck] = await pool.execute(`
@@ -113,7 +152,7 @@ router.get('/assessments/my-assessments',
     asyncHandler(async (req, res) => {
         try {
             const teacher_id = req.user.id;
-            const academic_year = req.query.academic_year || '2024-2025';
+            const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
             const subject_id = req.query.subject_id;
             const class_id = req.query.class_id;
             const publishedOnly = String(req.query.published_only || '').toLowerCase() === 'true';
@@ -440,7 +479,7 @@ router.get('/assessments/pending-approval',
             throw new AuthorizationError('Only admins can review pending assessment approvals');
         }
 
-        const academic_year = req.query.academic_year || '2024-2025';
+        const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
         const schemaMeta = await getAssessmentsSchemaMeta();
         const titleColumn = schemaMeta.fields.has('title') ? 'a.title' : 'a.assessment_name';
         const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
@@ -574,7 +613,7 @@ router.get('/grades/student/:student_id',
     asyncHandler(async (req, res) => {
         try {
             const student_id = req.params.student_id;
-            const academic_year = req.query.academic_year || '2024-2025';
+            const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
             const subject_id = req.query.subject_id;
             const term = req.query.term;
             
