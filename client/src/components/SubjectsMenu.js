@@ -991,6 +991,54 @@ const SubjectsMenu = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }, []);
 
+  const fetchMaterialBlob = useCallback(async (materialId, action, signal) => {
+    const token = localStorage.getItem('sms_token');
+    if (!token) {
+      throw new Error('Authentication token missing. Please log in again.');
+    }
+
+    const requestUrl = `/api/materials/${materialId}/${action}`;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch(requestUrl, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`
+          },
+          cache: 'no-store',
+          signal
+        });
+
+        if (!response.ok) {
+          let errorMessage = `${action} failed`;
+          try {
+            const errorPayload = await response.json();
+            errorMessage = errorPayload?.message || errorMessage;
+          } catch (parseError) {
+            // Ignore non-JSON error payloads
+          }
+          throw new Error(errorMessage);
+        }
+
+        return await response.blob();
+      } catch (error) {
+        lastError = error;
+        if (signal?.aborted) {
+          throw error;
+        }
+
+        if (attempt === 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+      }
+    }
+
+    throw lastError || new Error(`${action} failed`);
+  }, []);
+
   const fetchMaterials = useCallback(async (forceRefresh = false) => {
     console.log('🔄 fetchMaterials called, forceRefresh:', forceRefresh);
     try {
@@ -1066,6 +1114,7 @@ const SubjectsMenu = () => {
   // File viewer media fetching effect
   useEffect(() => {
     let currentBlobUrl = null;
+    const controller = new AbortController();
     
     const fetchMedia = async () => {
       if (!showFileViewer || !selectedMaterial) {
@@ -1083,11 +1132,7 @@ const SubjectsMenu = () => {
       setViewerError(null);
       
       try {
-        const response = await api.get(`/api/materials/${selectedMaterial.id}/view`, {
-          responseType: 'blob',
-        });
-
-        const blob = response.data;
+        const blob = await fetchMaterialBlob(selectedMaterial.id, 'view', controller.signal);
         if (currentBlobUrl) {
           URL.revokeObjectURL(currentBlobUrl);
         }
@@ -1095,7 +1140,7 @@ const SubjectsMenu = () => {
         setMediaBlob(currentBlobUrl);
       } catch (err) {
         console.error('Error loading media:', err);
-        setViewerError(err.message);
+        setViewerError(err.message || 'Failed to load preview');
       } finally {
         setViewerLoading(false);
       }
@@ -1105,11 +1150,12 @@ const SubjectsMenu = () => {
     
     // Cleanup function
     return () => {
+      controller.abort();
       if (currentBlobUrl) {
         URL.revokeObjectURL(currentBlobUrl);
       }
     };
-  }, [api, showFileViewer, selectedMaterial?.id]);
+  }, [fetchMaterialBlob, showFileViewer, selectedMaterial?.id]);
 
   // Helper function to get file icon and type
   const getFileIcon = useCallback((fileName, mimeType) => {
@@ -1170,29 +1216,21 @@ const SubjectsMenu = () => {
     }
 
     try {
-      const response = await api.get(`/api/materials/${material.id}/download`, {
-        responseType: 'blob',
-      });
-
-      if (response.status >= 200 && response.status < 300) {
-        const blob = response.data;
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = material.fileName || material.name || 'download';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        toast.success('File downloaded successfully!');
-      } else {
-        throw new Error('Download failed');
-      }
+      const blob = await fetchMaterialBlob(material.id, 'download');
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = material.fileName || material.name || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      toast.success('File downloaded successfully!');
     } catch (error) {
       console.error('Error downloading file:', error);
-      toast.error('Failed to download file. Please try again.');
+      toast.error(error.message || 'Failed to download file. Please try again.');
     }
-  }, [api]);
+  }, [fetchMaterialBlob]);
 
   // Function to handle material deletion
   const handleDeleteMaterial = useCallback(async (materialId) => {
