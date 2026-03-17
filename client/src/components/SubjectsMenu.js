@@ -991,6 +991,21 @@ const SubjectsMenu = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }, []);
 
+  const normalizeMaterialForUi = useCallback((material) => ({
+    id: material.id,
+    name: material.fileName,
+    type: material.fileType.toUpperCase(),
+    mimeType: material.mimeType,
+    size: formatFileSize(material.fileSize),
+    subject: material.subject,
+    subjectId: material.subjectId || material.subject_id || null,
+    uploadDate: new Date(material.uploadDate).toISOString().split('T')[0],
+    category: material.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    tags: material.tags || [],
+    fileName: material.fileName,
+    fileAvailable: material.fileAvailable !== false
+  }), [formatFileSize]);
+
   const fetchMaterialBlob = useCallback(async (materialId, action, signal) => {
     const token = localStorage.getItem('sms_token');
     if (!token) {
@@ -1053,19 +1068,7 @@ const SubjectsMenu = () => {
         console.log('📁 Raw materials from API:', result.data.length);
         
         // Transform API data to match component expectations
-        const transformedMaterials = result.data.map(material => ({
-          id: material.id,
-          name: material.fileName,
-          type: material.fileType.toUpperCase(),
-          mimeType: material.mimeType,
-          size: formatFileSize(material.fileSize),
-          subject: material.subject,
-          uploadDate: new Date(material.uploadDate).toISOString().split('T')[0],
-          category: material.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-          tags: material.tags || [],
-          fileName: material.fileName,
-          fileAvailable: material.fileAvailable !== false
-        }));
+        const transformedMaterials = result.data.map(normalizeMaterialForUi);
         
         // Deduplicate at the source to prevent React key conflicts
         const uniqueMaterials = transformedMaterials.reduce((acc, material) => {
@@ -1090,7 +1093,7 @@ const SubjectsMenu = () => {
       toast.error('Failed to fetch materials');
       setMaterials([]);
     }
-  }, [api, formatFileSize]);
+  }, [api, normalizeMaterialForUi]);
 
   // Sample data - replace with API calls
   useEffect(() => {
@@ -1586,25 +1589,48 @@ const SubjectsMenu = () => {
     setSelectedSubject(subject);
     setLoading(true);
     try {
-      // Fetch materials for this subject
-      const response = await api.get('/api/materials/my-materials', {
-        params: {
-          subject_id: subject.id,
-          limit: 100,
-          ...(filters.class ? { class_id: filters.class } : {}),
-        },
-      });
+      const params = {
+        subject_id: subject.id,
+        limit: 100,
+        ...(filters.class ? { class_id: filters.class } : {}),
+      };
+
+      let response;
+      let lastError;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          response = await api.get('/api/materials/my-materials', { params });
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 1 && (error.code === 'ERR_NETWORK' || !error.response)) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            continue;
+          }
+          throw error;
+        }
+      }
 
       if (response.status >= 200 && response.status < 300) {
         const result = response.data;
-        setSubjectMaterials(result?.data || []);
+        setSubjectMaterials((result?.data || []).map(normalizeMaterialForUi));
         setShowMaterialsModal(true);
       } else {
         toast.error('Failed to load materials for this subject');
       }
     } catch (error) {
       console.error('Error fetching materials:', error);
-      toast.error(error.response?.data?.message || 'Failed to load materials');
+      const fallbackMaterials = materials.filter(material =>
+        material.subjectId === subject.id || material.subject === subject.name
+      );
+
+      if (fallbackMaterials.length > 0) {
+        setSubjectMaterials(fallbackMaterials);
+        setShowMaterialsModal(true);
+        toast.warning('Using cached materials because the server connection was interrupted.');
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to load materials');
+      }
     } finally {
       setLoading(false);
     }
