@@ -1114,52 +1114,6 @@ const SubjectsMenu = () => {
     }
   }, [subjects]);
   
-  // File viewer media fetching effect
-  useEffect(() => {
-    let currentBlobUrl = null;
-    const controller = new AbortController();
-    
-    const fetchMedia = async () => {
-      if (!showFileViewer || !selectedMaterial) {
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
-          currentBlobUrl = null;
-        }
-        setMediaBlob(null);
-        setViewerLoading(false);
-        setViewerError(null);
-        return;
-      }
-      
-      setViewerLoading(true);
-      setViewerError(null);
-      
-      try {
-        const blob = await fetchMaterialBlob(selectedMaterial.id, 'view', controller.signal);
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
-        }
-        currentBlobUrl = URL.createObjectURL(blob);
-        setMediaBlob(currentBlobUrl);
-      } catch (err) {
-        console.error('Error loading media:', err);
-        setViewerError(err.message || 'Failed to load preview');
-      } finally {
-        setViewerLoading(false);
-      }
-    };
-
-    fetchMedia();
-    
-    // Cleanup function
-    return () => {
-      controller.abort();
-      if (currentBlobUrl) {
-        URL.revokeObjectURL(currentBlobUrl);
-      }
-    };
-  }, [fetchMaterialBlob, showFileViewer, selectedMaterial?.id]);
-
   // Helper function to get file icon and type
   const getFileIcon = useCallback((fileName, mimeType) => {
     const extension = fileName?.toLowerCase().split('.').pop() || '';
@@ -1211,6 +1165,72 @@ const SubjectsMenu = () => {
     // Cleanup will be handled by the useEffect cleanup function
   }, []);
 
+  const handleStaleMaterial = useCallback((material, message) => {
+    if (!material?.id) {
+      return;
+    }
+
+    setMaterials(prev => prev.filter(item => item.id !== material.id));
+    setSubjectMaterials(prev => prev.filter(item => item.id !== material.id));
+
+    if (selectedMaterial?.id === material.id) {
+      handleCloseFileViewer();
+    }
+
+    fetchMaterials(true);
+    toast.error(message || 'This material record is stale. Re-upload the file to restore access.');
+  }, [fetchMaterials, handleCloseFileViewer, selectedMaterial]);
+
+  // File viewer media fetching effect
+  useEffect(() => {
+    let currentBlobUrl = null;
+    const controller = new AbortController();
+    
+    const fetchMedia = async () => {
+      if (!showFileViewer || !selectedMaterial) {
+        if (currentBlobUrl) {
+          URL.revokeObjectURL(currentBlobUrl);
+          currentBlobUrl = null;
+        }
+        setMediaBlob(null);
+        setViewerLoading(false);
+        setViewerError(null);
+        return;
+      }
+      
+      setViewerLoading(true);
+      setViewerError(null);
+      
+      try {
+        const blob = await fetchMaterialBlob(selectedMaterial.id, 'view', controller.signal);
+        if (currentBlobUrl) {
+          URL.revokeObjectURL(currentBlobUrl);
+        }
+        currentBlobUrl = URL.createObjectURL(blob);
+        setMediaBlob(currentBlobUrl);
+      } catch (err) {
+        console.error('Error loading media:', err);
+        if (err.message?.toLowerCase().includes('material not found')) {
+          handleStaleMaterial(selectedMaterial, 'This material no longer exists on the server. Re-upload it to restore preview.');
+          setViewerError('Material not found');
+        } else {
+          setViewerError(err.message || 'Failed to load preview');
+        }
+      } finally {
+        setViewerLoading(false);
+      }
+    };
+
+    fetchMedia();
+    
+    return () => {
+      controller.abort();
+      if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+      }
+    };
+  }, [fetchMaterialBlob, handleStaleMaterial, showFileViewer, selectedMaterial?.id]);
+
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
     if (material.fileAvailable === false) {
@@ -1231,9 +1251,13 @@ const SubjectsMenu = () => {
       toast.success('File downloaded successfully!');
     } catch (error) {
       console.error('Error downloading file:', error);
-      toast.error(error.message || 'Failed to download file. Please try again.');
+      if (error.message?.toLowerCase().includes('material not found')) {
+        handleStaleMaterial(material, 'This material no longer exists on the server. It has been removed from the list.');
+      } else {
+        toast.error(error.message || 'Failed to download file. Please try again.');
+      }
     }
-  }, [fetchMaterialBlob]);
+  }, [fetchMaterialBlob, handleStaleMaterial]);
 
   // Function to handle material deletion
   const handleDeleteMaterial = useCallback(async (materialId) => {
