@@ -26,6 +26,10 @@ const getAssessmentsSchemaMeta = async (connection) => {
     return assessmentsSchemaCache;
 };
 
+const invalidateAssessmentsSchemaCache = () => {
+    assessmentsSchemaCache = { kind: null, fields: null, checkedAt: 0 };
+};
+
 const isAssessmentPublished = (assessment, schemaMeta) => {
     if (schemaMeta.fields.has('is_published')) {
         return Boolean(assessment.is_published);
@@ -72,6 +76,38 @@ const getCurrentAcademicYearName = async (connection) => {
     } catch (_error) {
         return '2024-2025';
     }
+};
+
+const ensureApprovalWorkflowColumns = async (connection) => {
+    const schemaMeta = await getAssessmentsSchemaMeta(connection);
+    const alterStatements = [];
+
+    if (!schemaMeta.fields.has('approval_status')) {
+        alterStatements.push("ADD COLUMN approval_status VARCHAR(20) NOT NULL DEFAULT 'draft'");
+    }
+
+    if (!schemaMeta.fields.has('approval_submitted_at')) {
+        alterStatements.push('ADD COLUMN approval_submitted_at DATETIME NULL');
+    }
+
+    if (!schemaMeta.fields.has('approval_submitted_by')) {
+        alterStatements.push('ADD COLUMN approval_submitted_by INT NULL');
+    }
+
+    if (!schemaMeta.fields.has('approved_at')) {
+        alterStatements.push('ADD COLUMN approved_at DATETIME NULL');
+    }
+
+    if (!schemaMeta.fields.has('approved_by')) {
+        alterStatements.push('ADD COLUMN approved_by INT NULL');
+    }
+
+    if (alterStatements.length > 0) {
+        await connection.execute(`ALTER TABLE assessments ${alterStatements.join(', ')}`);
+        invalidateAssessmentsSchemaCache();
+    }
+
+    return getAssessmentsSchemaMeta(connection);
 };
 
 // Validation schemas
@@ -126,7 +162,7 @@ router.get('/teacher/classes', Auth.authenticateToken, async (req, res) => {
         }
 
         const connection = await pool.getConnection();
-        const schemaMeta = await getAssessmentsSchemaMeta(connection);
+        const schemaMeta = await ensureApprovalWorkflowColumns(connection);
         
         // First try to get assigned classes
         const assignedQuery = `
@@ -452,12 +488,12 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
             INSERT INTO assessments (
                 teacher_id, class_id, subject_id, assessment_name, exam_type, 
                 academic_year, assessment_date, max_marks, pass_marks, total_marks, 
-                description, duration_minutes, status, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                description, duration_minutes, status, approval_status, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             req.user.id, class_id, subject_id, assessment_name, exam_type,
             academicYear, assessment_date, max_marks, pass_marks, max_marks,
-            description, duration_minutes, 'draft', true
+            description, duration_minutes, 'draft', 'draft', true
         ]);
 
         const assessmentId = result.insertId;
@@ -621,7 +657,7 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
 
         const { student_marks } = value;
         const connection = await pool.getConnection();
-        const schemaMeta = await getAssessmentsSchemaMeta(connection);
+        const schemaMeta = await ensureApprovalWorkflowColumns(connection);
 
         // Verify teacher owns this assessment
         const [assessments] = await connection.execute(`
@@ -692,11 +728,14 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
                     WHEN status = 'draft' THEN 'completed' 
                     ELSE status 
                 END,
+                approval_status = 'pending',
+                approval_submitted_at = CURRENT_TIMESTAMP,
+                approval_submitted_by = ?,
                 is_published = FALSE,
                 is_final = FALSE,
                 updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            `, [id]);
+            `, [req.user.id, id]);
         } else {
             await connection.execute(`
                 UPDATE assessments 
@@ -705,9 +744,12 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
                     WHEN status = 'published' THEN 'completed'
                     ELSE status 
                 END,
+                approval_status = 'pending',
+                approval_submitted_at = CURRENT_TIMESTAMP,
+                approval_submitted_by = ?,
                 updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            `, [id]);
+            `, [req.user.id, id]);
         }
 
         connection.release();

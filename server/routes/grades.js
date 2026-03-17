@@ -23,6 +23,10 @@ const getAssessmentsSchemaMeta = async () => {
     return assessmentsSchemaCache;
 };
 
+const invalidateAssessmentsSchemaCache = () => {
+    assessmentsSchemaCache = { kind: null, fields: null, checkedAt: 0 };
+};
+
 const normalizeAssessmentRecord = (assessment, schemaMeta) => ({
     ...assessment,
     title: assessment.title || assessment.assessment_name,
@@ -72,6 +76,38 @@ const getCurrentAcademicYearName = async () => {
     }
 };
 
+const ensureApprovalWorkflowColumns = async () => {
+    const schemaMeta = await getAssessmentsSchemaMeta();
+    const alterStatements = [];
+
+    if (!schemaMeta.fields.has('approval_status')) {
+        alterStatements.push("ADD COLUMN approval_status VARCHAR(20) NOT NULL DEFAULT 'draft'");
+    }
+
+    if (!schemaMeta.fields.has('approval_submitted_at')) {
+        alterStatements.push('ADD COLUMN approval_submitted_at DATETIME NULL');
+    }
+
+    if (!schemaMeta.fields.has('approval_submitted_by')) {
+        alterStatements.push('ADD COLUMN approval_submitted_by INT NULL');
+    }
+
+    if (!schemaMeta.fields.has('approved_at')) {
+        alterStatements.push('ADD COLUMN approved_at DATETIME NULL');
+    }
+
+    if (!schemaMeta.fields.has('approved_by')) {
+        alterStatements.push('ADD COLUMN approved_by INT NULL');
+    }
+
+    if (alterStatements.length > 0) {
+        await pool.execute(`ALTER TABLE assessments ${alterStatements.join(', ')}`);
+        invalidateAssessmentsSchemaCache();
+    }
+
+    return getAssessmentsSchemaMeta();
+};
+
 // ==================== ASSESSMENTS ENDPOINTS ====================
 
 // Create new assessment
@@ -79,6 +115,7 @@ router.post('/assessments',
     Auth.authenticateToken,
     asyncHandler(async (req, res) => {
         try {
+            const schemaMeta = await ensureApprovalWorkflowColumns();
             const {
                 title, description, subject_id, class_id, assessment_type, 
                 total_marks, passing_marks, weight_percentage, due_date, 
@@ -117,13 +154,13 @@ router.post('/assessments',
                 INSERT INTO assessments (
                     title, description, subject_id, class_id, teacher_id, assessment_type, 
                     total_marks, passing_marks, weight_percentage, due_date, assessment_date,
-                    grading_scale_id, instructions, term, academic_year
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    grading_scale_id, instructions, term, academic_year, approval_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 title, description || null, subject_id, class_id, teacher_id, assessment_type,
                 total_marks, passing_marks || total_marks * 0.5, weight_percentage || 100.00,
                 due_date || null, assessment_date || null, gradingScale[0]?.id || null,
-                instructions || null, term || 'term1', academic_year
+                instructions || null, term || 'term1', academic_year, 'draft'
             ]);
             
             res.status(201).json({
@@ -393,15 +430,30 @@ router.post('/grades/record',
                 await connection.commit();
                 connection.release();
 
+                const schemaMeta = await ensureApprovalWorkflowColumns();
+
                 if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
                     await pool.execute(
-                        'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
-                        [assessment_id]
+                        `UPDATE assessments
+                         SET is_published = FALSE,
+                             is_final = FALSE,
+                             approval_status = 'pending',
+                             approval_submitted_at = CURRENT_TIMESTAMP,
+                             approval_submitted_by = ?,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?`,
+                        [graded_by, assessment_id]
                     );
                 } else if (schemaMeta.fields.has('status')) {
                     await pool.execute(
-                        "UPDATE assessments SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        [assessment_id]
+                        `UPDATE assessments
+                         SET status = 'completed',
+                             approval_status = 'pending',
+                             approval_submitted_at = CURRENT_TIMESTAMP,
+                             approval_submitted_by = ?,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?`,
+                        [graded_by, assessment_id]
                     );
                 }
                 
@@ -480,12 +532,14 @@ router.get('/assessments/pending-approval',
         }
 
         const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
-        const schemaMeta = await getAssessmentsSchemaMeta();
+        const schemaMeta = await ensureApprovalWorkflowColumns();
         const titleColumn = schemaMeta.fields.has('title') ? 'a.title' : 'a.assessment_name';
         const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
-        const pendingFilter = schemaMeta.fields.has('is_published')
-            ? '(a.is_published = FALSE OR a.is_published IS NULL)'
-            : "LOWER(COALESCE(a.status, '')) = 'completed'";
+        const pendingFilter = schemaMeta.fields.has('approval_status')
+            ? "LOWER(COALESCE(a.approval_status, 'draft')) = 'pending'"
+            : (schemaMeta.fields.has('is_published')
+                ? '(a.is_published = FALSE OR a.is_published IS NULL)'
+                : "LOWER(COALESCE(a.status, '')) = 'completed'");
         const marksJoin = schemaMeta.kind === 'legacy'
             ? 'LEFT JOIN assessment_marks am ON a.id = am.assessment_id'
             : 'LEFT JOIN student_grades sg ON a.id = sg.assessment_id';
@@ -511,7 +565,7 @@ router.get('/assessments/pending-approval',
               AND ${pendingFilter}
             GROUP BY a.id
             HAVING graded_count > 0
-            ORDER BY a.updated_at DESC, a.created_at DESC
+            ORDER BY COALESCE(a.approval_submitted_at, a.updated_at, a.created_at) DESC
         `, [academic_year]);
 
         res.json({
@@ -535,7 +589,7 @@ router.post('/assessments/:id/approve',
         }
 
         const { id } = req.params;
-        const schemaMeta = await getAssessmentsSchemaMeta();
+        const schemaMeta = await ensureApprovalWorkflowColumns();
 
         const [assessments] = await pool.execute('SELECT * FROM assessments WHERE id = ? LIMIT 1', [id]);
 
@@ -545,13 +599,26 @@ router.post('/assessments/:id/approve',
 
         if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
             await pool.execute(
-                'UPDATE assessments SET is_published = TRUE, is_final = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-                [id]
+                `UPDATE assessments
+                 SET is_published = TRUE,
+                     is_final = TRUE,
+                     approval_status = 'approved',
+                     approved_at = CURRENT_TIMESTAMP,
+                     approved_by = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [req.user.id, id]
             );
         } else if (schemaMeta.fields.has('status')) {
             await pool.execute(
-                "UPDATE assessments SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [id]
+                `UPDATE assessments
+                 SET status = 'published',
+                     approval_status = 'approved',
+                     approved_at = CURRENT_TIMESTAMP,
+                     approved_by = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [req.user.id, id]
             );
         }
 
