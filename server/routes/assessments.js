@@ -78,6 +78,23 @@ const getCurrentAcademicYearName = async (connection) => {
     }
 };
 
+const ensureClassResultPublicationsTable = async (connection) => {
+    await connection.execute(`
+        CREATE TABLE IF NOT EXISTS class_result_publications (
+            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+            class_id INT NOT NULL,
+            academic_year VARCHAR(32) NOT NULL,
+            result_type VARCHAR(20) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'published',
+            published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            published_by INT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_class_result_publication (class_id, academic_year, result_type)
+        )
+    `);
+};
+
 const ensureApprovalWorkflowColumns = async (connection) => {
     const schemaMeta = await getAssessmentsSchemaMeta(connection);
     const alterStatements = [];
@@ -837,6 +854,7 @@ router.get('/:id/results', Auth.authenticateToken, async (req, res) => {
         const { id } = req.params;
         const connection = await pool.getConnection();
         const schemaMeta = await getAssessmentsSchemaMeta(connection);
+        await ensureClassResultPublicationsTable(connection);
 
         // Get assessment details
         const whereCondition = req.user.role === 'admin' ? 'WHERE a.id = ?' : 'WHERE a.id = ? AND a.teacher_id = ?';
@@ -872,24 +890,114 @@ router.get('/:id/results', Auth.authenticateToken, async (req, res) => {
             });
         }
 
-        // Get all student results for this assessment
-        const [results] = await connection.execute(`
-            SELECT 
-                am.*,
-                s.student_id as student_number,
-                s.admission_number,
-                u.first_name,
-                u.last_name,
-                CASE 
-                    WHEN am.marks_obtained IS NULL OR am.is_present = FALSE THEN NULL
-                    ELSE ROUND((am.marks_obtained / ?) * 100, 2)
-                END as percentage
-            FROM assessment_marks am
-            INNER JOIN students s ON am.student_id = s.id
-            INNER JOIN users u ON s.user_id = u.id
-            WHERE am.assessment_id = ?
-            ORDER BY u.first_name, u.last_name
-        `, [assessment.max_marks, id]);
+        const examType = String(assessment.exam_type || assessment.assessment_type || '').toLowerCase();
+        if (req.user.role !== 'admin' && ['terminal exams', 'annual exams'].includes(examType)) {
+            const resultType = examType === 'terminal exams' ? 'terminal' : 'annual';
+            const [publicationRows] = await connection.execute(
+                `SELECT id
+                 FROM class_result_publications
+                 WHERE class_id = ? AND academic_year = ? AND result_type = ? AND status = 'published'
+                 LIMIT 1`,
+                [assessment.class_id, assessment.academic_year, resultType]
+            );
+
+            if (publicationRows.length === 0) {
+                connection.release();
+                return res.status(403).json({
+                    success: false,
+                    message: `${resultType === 'terminal' ? 'Terminal' : 'Annual'} class results have not been published by admin yet`
+                });
+            }
+        }
+
+        let results = [];
+
+        if (examType === 'terminal exams' || examType === 'annual exams') {
+            const companionType = examType === 'terminal exams' ? 'mid term test 1' : 'mid term test 2';
+            const resultLabel = examType === 'terminal exams' ? 'Terminal Results' : 'Annual Results';
+            const [companionAssessments] = await connection.execute(
+                `SELECT id, assessment_name
+                 FROM assessments
+                 WHERE class_id = ? AND subject_id = ? AND academic_year = ?
+                   AND LOWER(COALESCE(exam_type, '')) = ?
+                 ORDER BY assessment_date DESC, created_at DESC
+                 LIMIT 1`,
+                [assessment.class_id, assessment.subject_id, assessment.academic_year, companionType]
+            );
+
+            const companionAssessmentId = companionAssessments[0]?.id || null;
+
+            const [combinedResults] = await connection.execute(`
+                SELECT
+                    current_am.student_id,
+                    current_am.id as mark_id,
+                    current_am.is_present as current_is_present,
+                    current_am.marks_obtained as current_marks,
+                    base_am.is_present as base_is_present,
+                    base_am.marks_obtained as base_marks,
+                    s.student_id as student_number,
+                    s.admission_number,
+                    u.first_name,
+                    u.last_name
+                FROM assessment_marks current_am
+                INNER JOIN students s ON current_am.student_id = s.id
+                INNER JOIN users u ON s.user_id = u.id
+                LEFT JOIN assessment_marks base_am
+                    ON base_am.student_id = current_am.student_id
+                   AND base_am.assessment_id = ?
+                WHERE current_am.assessment_id = ?
+                ORDER BY u.first_name, u.last_name
+            `, [companionAssessmentId, id]);
+
+            results = combinedResults.map((row) => {
+                const hasBase = row.base_is_present !== null && row.base_is_present !== undefined;
+                const currentValid = row.current_is_present && row.current_marks !== null;
+                const baseValid = hasBase && row.base_is_present && row.base_marks !== null;
+                const marksObtained = currentValid && baseValid
+                    ? Math.round((((Number(row.current_marks) + Number(row.base_marks)) / 2) + Number.EPSILON) * 100) / 100
+                    : null;
+                const percentage = marksObtained === null
+                    ? null
+                    : Math.round(((marksObtained / assessment.max_marks) * 100 + Number.EPSILON) * 100) / 100;
+
+                return {
+                    mark_id: row.mark_id,
+                    student_id: row.student_id,
+                    student_number: row.student_number,
+                    admission_number: row.admission_number,
+                    first_name: row.first_name,
+                    last_name: row.last_name,
+                    marks_obtained: marksObtained,
+                    percentage,
+                    is_present: currentValid && baseValid,
+                    grade: calculateGrade(marksObtained, assessment.max_marks),
+                    remarks: marksObtained === null
+                        ? `Missing ${companionType} or ${examType} marks`
+                        : `${resultLabel} calculated from ${companionType} and ${examType}`,
+                };
+            });
+
+            assessment.assessment_name = `${resultLabel} - ${assessment.subject_name}`;
+        } else {
+            const [rawResults] = await connection.execute(`
+                SELECT 
+                    am.*,
+                    s.student_id as student_number,
+                    s.admission_number,
+                    u.first_name,
+                    u.last_name,
+                    CASE 
+                        WHEN am.marks_obtained IS NULL OR am.is_present = FALSE THEN NULL
+                        ELSE ROUND((am.marks_obtained / ?) * 100, 2)
+                    END as percentage
+                FROM assessment_marks am
+                INNER JOIN students s ON am.student_id = s.id
+                INNER JOIN users u ON s.user_id = u.id
+                WHERE am.assessment_id = ?
+                ORDER BY u.first_name, u.last_name
+            `, [assessment.max_marks, id]);
+            results = rawResults;
+        }
 
         // Calculate summary statistics
         const gradedResults = results.filter(r => r.is_present && r.marks_obtained !== null);

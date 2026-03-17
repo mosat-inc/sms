@@ -722,6 +722,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
     end_date: ''
   });
   const [resultsCategory, setResultsCategory] = useState('');
+  const [classResultPublication, setClassResultPublication] = useState({ published: false, publication: null });
   
   // State for student grade analysis table
   const [studentGradeAnalysis, setStudentGradeAnalysis] = useState(null);
@@ -818,6 +819,31 @@ const GradesMenu = ({ mode = 'grades' }) => {
       fetchAssessments();
     }
   }, [activeTab, analyticsFilters, resultsCategory, isResultsMode]);
+
+  useEffect(() => {
+    if (!isResultsMode || !isAdmin || !['terminal', 'annual'].includes(resultsCategory) || !analyticsFilters.class_id) {
+      setClassResultPublication({ published: false, publication: null });
+      return;
+    }
+
+    const fetchClassResultPublication = async () => {
+      try {
+        const response = await api.get('/api/grades/results/publication-status', {
+          params: {
+            class_id: analyticsFilters.class_id,
+            result_type: resultsCategory,
+          },
+        });
+        if (response.data?.success) {
+          setClassResultPublication(response.data.data || { published: false, publication: null });
+        }
+      } catch (error) {
+        console.error('Error fetching class result publication status:', error);
+      }
+    };
+
+    fetchClassResultPublication();
+  }, [api, analyticsFilters.class_id, isAdmin, isResultsMode, resultsCategory]);
 
   useEffect(() => {
     if (isGradesMode && isAdmin && activeTab === 'pending-approvals') {
@@ -956,6 +982,34 @@ const GradesMenu = ({ mode = 'grades' }) => {
     } catch (error) {
       console.error('Error approving assessment:', error);
       toast.error(error.response?.data?.message || 'Failed to approve assessment');
+    }
+  };
+
+  const publishClassResults = async () => {
+    if (!analyticsFilters.class_id || !['terminal', 'annual'].includes(resultsCategory)) {
+      toast.error('Select class and result type first');
+      return;
+    }
+
+    try {
+      const response = await api.post('/api/grades/results/publish-class', {
+        class_id: Number(analyticsFilters.class_id),
+        result_type: resultsCategory,
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || 'Class results published successfully');
+        setClassResultPublication({
+          published: true,
+          publication: { published_at: new Date().toISOString() },
+        });
+        fetchAssessments();
+      } else {
+        toast.error(response.data?.message || 'Failed to publish class results');
+      }
+    } catch (error) {
+      console.error('Error publishing class results:', error);
+      toast.error(error.response?.data?.message || 'Failed to publish class results');
     }
   };
 
@@ -2194,6 +2248,15 @@ const GradesMenu = ({ mode = 'grades' }) => {
             >
               <FaArrowLeft /> Change Result Type
             </SecondaryButton>
+            {isAdmin && ['terminal', 'annual'].includes(resultsCategory) && (
+              <PrimaryButton
+                type="button"
+                onClick={publishClassResults}
+                disabled={!analyticsFilters.class_id}
+              >
+                <FaCheckCircle /> {classResultPublication.published ? 'Published For Class' : 'Publish For Class'}
+              </PrimaryButton>
+            )}
           </div>
         )}
 
@@ -2258,6 +2321,19 @@ const GradesMenu = ({ mode = 'grades' }) => {
           </div>
         )}
       </FilterSection>
+
+      {isResultsMode && isAdmin && ['terminal', 'annual'].includes(resultsCategory) && analyticsFilters.class_id && (
+        <InfoMessage>
+          <span style={{ display: 'inline-flex', fontSize: '1.1rem' }}>
+            <FaInfoCircle />
+          </span>
+          <span>
+            {classResultPublication.published
+              ? `${resultsCategory === 'terminal' ? 'Terminal' : 'Annual'} results are published for this class.`
+              : `${resultsCategory === 'terminal' ? 'Terminal' : 'Annual'} results will stay hidden until you publish them for the selected class.`}
+          </span>
+        </InfoMessage>
+      )}
 
       {loading ? (
         <LoadingSpinner>

@@ -108,6 +108,23 @@ const ensureApprovalWorkflowColumns = async () => {
     return getAssessmentsSchemaMeta();
 };
 
+const ensureClassResultPublicationsTable = async () => {
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS class_result_publications (
+            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+            class_id INT NOT NULL,
+            academic_year VARCHAR(32) NOT NULL,
+            result_type VARCHAR(20) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'published',
+            published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            published_by INT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_class_result_publication (class_id, academic_year, result_type)
+        )
+    `);
+};
+
 // ==================== ASSESSMENTS ENDPOINTS ====================
 
 // Create new assessment
@@ -197,6 +214,7 @@ router.get('/assessments/my-assessments',
             const unpublishedOnly = String(req.query.unpublished_only || '').toLowerCase() === 'true';
             const schemaMeta = await getAssessmentsSchemaMeta();
             const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
+            const requiresClassPublish = resultBucket === 'terminal' || resultBucket === 'annual';
             
             let query = `
                 SELECT a.*, s.name as subject_name, s.code as subject_code,
@@ -234,6 +252,21 @@ router.get('/assessments/my-assessments',
                 query += ` AND LOWER(COALESCE(${typeColumn}, '')) = 'annual exams'`;
             } else if (resultBucket === 'assessment') {
                 query += ` AND LOWER(COALESCE(${typeColumn}, '')) NOT IN ('terminal exams', 'annual exams')`;
+            }
+
+            if (requiresClassPublish && publishedOnly) {
+                await ensureClassResultPublicationsTable();
+                query += `
+                    AND EXISTS (
+                        SELECT 1
+                        FROM class_result_publications crp
+                        WHERE crp.class_id = a.class_id
+                          AND crp.academic_year = a.academic_year
+                          AND crp.result_type = ?
+                          AND crp.status = 'published'
+                    )
+                `;
+                params.push(resultBucket);
             }
 
             if (publishedOnly) {
@@ -639,6 +672,105 @@ router.post('/assessments/:id/approve',
                 assessment_id: Number(id),
                 approval_status: 'approved',
             },
+        });
+    })
+);
+
+router.get('/results/publication-status',
+    Auth.authenticateToken,
+    asyncHandler(async (req, res) => {
+        const class_id = Number(req.query.class_id);
+        const result_type = String(req.query.result_type || '').toLowerCase();
+        const academic_year = req.query.academic_year || await getCurrentAcademicYearName();
+
+        if (!class_id || !['terminal', 'annual'].includes(result_type)) {
+            return res.status(400).json({
+                success: false,
+                message: 'class_id and result_type (terminal or annual) are required',
+            });
+        }
+
+        await ensureClassResultPublicationsTable();
+
+        const [rows] = await pool.execute(
+            `SELECT *
+             FROM class_result_publications
+             WHERE class_id = ? AND academic_year = ? AND result_type = ?
+             LIMIT 1`,
+            [class_id, academic_year, result_type]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                published: rows.length > 0 && rows[0].status === 'published',
+                publication: rows[0] || null,
+            },
+        });
+    })
+);
+
+router.post('/results/publish-class',
+    Auth.authenticateToken,
+    asyncHandler(async (req, res) => {
+        if (req.user.role !== 'admin') {
+            throw new AuthorizationError('Only admins can publish class terminal or annual results');
+        }
+
+        const class_id = Number(req.body.class_id);
+        const result_type = String(req.body.result_type || '').toLowerCase();
+        const academic_year = req.body.academic_year || await getCurrentAcademicYearName();
+
+        if (!class_id || !['terminal', 'annual'].includes(result_type)) {
+            return res.status(400).json({
+                success: false,
+                message: 'class_id and result_type (terminal or annual) are required',
+            });
+        }
+
+        await ensureClassResultPublicationsTable();
+
+        const examType = result_type === 'terminal' ? 'terminal exams' : 'annual exams';
+        const schemaMeta = await ensureApprovalWorkflowColumns();
+        const publishedFilter = schemaMeta.fields.has('approval_status')
+            ? "LOWER(COALESCE(a.approval_status, 'draft')) = 'approved'"
+            : (schemaMeta.fields.has('is_published')
+                ? 'a.is_published = TRUE'
+                : "LOWER(COALESCE(a.status, '')) IN ('published', 'closed')");
+        const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
+
+        const [eligibleRows] = await pool.execute(
+            `SELECT COUNT(*) AS approved_count
+             FROM assessments a
+             WHERE a.class_id = ?
+               AND a.academic_year = ?
+               AND LOWER(COALESCE(${typeColumn}, '')) = ?
+               AND ${publishedFilter}`,
+            [class_id, academic_year, examType]
+        );
+
+        if (!eligibleRows[0]?.approved_count) {
+            return res.status(400).json({
+                success: false,
+                message: `No approved ${result_type} assessments found for this class in ${academic_year}`,
+            });
+        }
+
+        await pool.execute(
+            `INSERT INTO class_result_publications
+                (class_id, academic_year, result_type, status, published_at, published_by)
+             VALUES (?, ?, ?, 'published', CURRENT_TIMESTAMP, ?)
+             ON DUPLICATE KEY UPDATE
+                status = VALUES(status),
+                published_at = VALUES(published_at),
+                published_by = VALUES(published_by),
+                updated_at = CURRENT_TIMESTAMP`,
+            [class_id, academic_year, result_type, req.user.id]
+        );
+
+        res.json({
+            success: true,
+            message: `${result_type === 'terminal' ? 'Terminal' : 'Annual'} results published for the selected class`,
         });
     })
 );
