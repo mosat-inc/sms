@@ -70,7 +70,8 @@ router.get('/:subject_id/classes',
                 c.level,
                 c.capacity,
                 COUNT(DISTINCT s.id) as student_count,
-                tsa.is_primary_teacher
+                tsa.is_primary_teacher,
+                tsa.academic_year
             FROM teacher_subject_assignments tsa
             INNER JOIN classes c ON tsa.class_id = c.id
             LEFT JOIN students s ON c.id = s.class_id AND s.status = 'active'
@@ -82,7 +83,30 @@ router.get('/:subject_id/classes',
             ORDER BY c.level, c.name
         `;
         
-        const [classes] = await pool.query(query, [teacherId, Number(subjectId), academicYear]);
+        let [classes] = await pool.query(query, [teacherId, Number(subjectId), academicYear]);
+
+        if (classes.length === 0) {
+            console.log(`⚠️ No subject classes found for teacher ${teacherId} in ${academicYear}, falling back to any academic year`);
+            const fallbackQuery = `
+                SELECT DISTINCT
+                    c.id,
+                    c.name,
+                    c.level,
+                    c.capacity,
+                    COUNT(DISTINCT s.id) as student_count,
+                    tsa.is_primary_teacher,
+                    tsa.academic_year
+                FROM teacher_subject_assignments tsa
+                INNER JOIN classes c ON tsa.class_id = c.id
+                LEFT JOIN students s ON c.id = s.class_id AND s.status = 'active'
+                WHERE tsa.teacher_id = ?
+                    AND tsa.subject_id = ?
+                    AND c.is_active = TRUE
+                GROUP BY c.id, c.name, c.level, c.capacity, tsa.is_primary_teacher, tsa.academic_year
+                ORDER BY tsa.academic_year DESC, c.level, c.name
+            `;
+            [classes] = await pool.query(fallbackQuery, [teacherId, Number(subjectId)]);
+        }
         
         console.log(`✅ Found ${classes.length} classes for subject`);
         
@@ -92,7 +116,8 @@ router.get('/:subject_id/classes',
             level: classItem.level,
             capacity: classItem.capacity,
             studentCount: classItem.student_count || 0,
-            isPrimaryTeacher: classItem.is_primary_teacher
+            isPrimaryTeacher: classItem.is_primary_teacher,
+            academicYear: classItem.academic_year
         }));
         
         res.json({
@@ -122,11 +147,11 @@ router.get('/my-subjects',
         console.log('User info:', { id: req.user.id, username: req.user.username, role: req.user.role });
         
         // First check if teacher has any assignments
-        const [assignmentCheck] = await pool.execute(
+        let [assignmentCheck] = await pool.execute(
             'SELECT tsa.*, s.name as subject_name, c.name as class_name FROM teacher_subject_assignments tsa LEFT JOIN subjects s ON tsa.subject_id = s.id LEFT JOIN classes c ON tsa.class_id = c.id WHERE tsa.teacher_id = ? AND tsa.academic_year = ?',
             [teacherId, academicYear]
         );
-        
+
         console.log(`📝 Found ${assignmentCheck.length} assignments for teacher:`, assignmentCheck);
         
         const query = `
@@ -163,7 +188,52 @@ router.get('/my-subjects',
             ORDER BY s.name
         `;
         
-        const [subjects] = await pool.execute(query, [teacherId, academicYear]);
+        let [subjects] = await pool.execute(query, [teacherId, academicYear]);
+
+        if (subjects.length === 0) {
+            console.log(`⚠️ No subjects found for teacher ${teacherId} in ${academicYear}, falling back to all academic years`);
+
+            [assignmentCheck] = await pool.execute(
+                'SELECT tsa.*, s.name as subject_name, c.name as class_name FROM teacher_subject_assignments tsa LEFT JOIN subjects s ON tsa.subject_id = s.id LEFT JOIN classes c ON tsa.class_id = c.id WHERE tsa.teacher_id = ? ORDER BY tsa.academic_year DESC',
+                [teacherId]
+            );
+
+            const fallbackQuery = `
+                SELECT DISTINCT
+                    s.id,
+                    s.name,
+                    s.code,
+                    s.description,
+                    s.department,
+                    COUNT(DISTINCT tsa.class_id) as class_count,
+                    COUNT(DISTINCT st.id) as total_students,
+                    COALESCE(ss.total_materials, 0) as materials_count,
+                    COALESCE(ss.total_topics, 0) as total_topics,
+                    COALESCE(ss.completed_topics, 0) as completed_topics,
+                    COALESCE(ss.pending_topics, 0) as pending_topics,
+                    COALESCE(ss.total_hours_planned, 0) as hours_planned,
+                    COALESCE(ss.total_hours_completed, 0) as hours_completed,
+                    COALESCE(ss.average_completion_rate, 0) as progress_percentage,
+                    GROUP_CONCAT(DISTINCT c.name) as class_names,
+                    MAX(tsa.academic_year) as assignment_academic_year
+                FROM subjects s
+                INNER JOIN teacher_subject_assignments tsa ON s.id = tsa.subject_id
+                LEFT JOIN classes c ON tsa.class_id = c.id
+                LEFT JOIN students st ON c.id = st.class_id AND st.status = 'active'
+                LEFT JOIN subject_statistics ss ON s.id = ss.subject_id 
+                    AND ss.teacher_id = tsa.teacher_id 
+                    AND ss.academic_year = tsa.academic_year
+                WHERE tsa.teacher_id = ?
+                    AND s.is_active = TRUE
+                GROUP BY s.id, s.name, s.code, s.description, s.department,
+                    ss.total_materials, ss.total_topics, ss.completed_topics, 
+                    ss.pending_topics, ss.total_hours_planned, ss.total_hours_completed,
+                    ss.average_completion_rate
+                ORDER BY MAX(tsa.academic_year) DESC, s.name
+            `;
+
+            [subjects] = await pool.execute(fallbackQuery, [teacherId]);
+        }
         
         console.log(`✅ Query returned ${subjects.length} subjects:`, subjects.map(s => ({ id: s.id, name: s.name, classes: s.class_names })));
         
@@ -181,7 +251,8 @@ router.get('/my-subjects',
             lessonsPlanned: subject.total_topics || 0,
             lessonsCompleted: subject.completed_topics || 0,
             hoursPlanned: parseFloat(subject.hours_planned || 0),
-            hoursCompleted: parseFloat(subject.hours_completed || 0)
+            hoursCompleted: parseFloat(subject.hours_completed || 0),
+            academicYear: subject.assignment_academic_year || academicYear
         }));
         
         console.log('📤 Sending response with', transformedSubjects.length, 'subjects');
