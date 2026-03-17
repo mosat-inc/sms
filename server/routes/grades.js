@@ -431,6 +431,13 @@ router.get('/assessments/pending-approval',
         const pendingFilter = schemaMeta.fields.has('is_published')
             ? '(a.is_published = FALSE OR a.is_published IS NULL)'
             : "LOWER(COALESCE(a.status, '')) NOT IN ('published', 'closed')";
+        const marksJoin = schemaMeta.kind === 'legacy'
+            ? 'LEFT JOIN assessment_marks am ON a.id = am.assessment_id'
+            : 'LEFT JOIN student_grades sg ON a.id = sg.assessment_id';
+        const totalStudentsExpr = schemaMeta.kind === 'legacy' ? 'COUNT(am.id)' : 'COUNT(sg.id)';
+        const gradedCountExpr = schemaMeta.kind === 'legacy'
+            ? 'COUNT(CASE WHEN am.marks_obtained IS NOT NULL OR am.is_present = FALSE THEN 1 END)'
+            : 'COUNT(CASE WHEN sg.marks_obtained IS NOT NULL OR sg.is_absent = TRUE OR sg.is_excused = TRUE THEN 1 END)';
 
         const [assessments] = await pool.execute(`
             SELECT a.*, ${titleColumn} as display_title, ${typeColumn} as display_type,
@@ -438,13 +445,13 @@ router.get('/assessments/pending-approval',
                    c.name as class_name,
                    u.first_name as teacher_first_name,
                    u.last_name as teacher_last_name,
-                   COUNT(am.id) as total_students,
-                   COUNT(CASE WHEN am.marks_obtained IS NOT NULL OR am.is_present = FALSE THEN 1 END) as graded_count
+                   ${totalStudentsExpr} as total_students,
+                   ${gradedCountExpr} as graded_count
             FROM assessments a
             INNER JOIN subjects s ON a.subject_id = s.id
             INNER JOIN classes c ON a.class_id = c.id
             INNER JOIN users u ON a.teacher_id = u.id
-            LEFT JOIN assessment_marks am ON a.id = am.assessment_id
+            ${marksJoin}
             WHERE a.academic_year = ?
               AND ${pendingFilter}
             GROUP BY a.id
