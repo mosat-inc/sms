@@ -90,6 +90,8 @@ router.get('/assessments/my-assessments',
             const academic_year = req.query.academic_year || '2024-2025';
             const subject_id = req.query.subject_id;
             const class_id = req.query.class_id;
+            const publishedOnly = String(req.query.published_only || '').toLowerCase() === 'true';
+            const unpublishedOnly = String(req.query.unpublished_only || '').toLowerCase() === 'true';
             
             let query = `
                 SELECT a.*, s.name as subject_name, s.code as subject_code,
@@ -101,10 +103,15 @@ router.get('/assessments/my-assessments',
                 INNER JOIN subjects s ON a.subject_id = s.id
                 INNER JOIN classes c ON a.class_id = c.id
                 LEFT JOIN assessment_marks am ON a.id = am.assessment_id
-                WHERE a.teacher_id = ? AND a.academic_year = ?
+                WHERE a.academic_year = ?
             `;
             
-            const params = [teacher_id, academic_year];
+            const params = [academic_year];
+
+            if (req.user.role !== 'admin') {
+                query += ' AND a.teacher_id = ?';
+                params.push(teacher_id);
+            }
             
             if (subject_id) {
                 query += ' AND a.subject_id = ?';
@@ -114,6 +121,14 @@ router.get('/assessments/my-assessments',
             if (class_id) {
                 query += ' AND a.class_id = ?';
                 params.push(class_id);
+            }
+
+            if (publishedOnly) {
+                query += ' AND a.is_published = TRUE';
+            }
+
+            if (unpublishedOnly) {
+                query += ' AND (a.is_published = FALSE OR a.is_published IS NULL)';
             }
             
             
@@ -275,6 +290,11 @@ router.post('/grades/record',
                 
                 await connection.commit();
                 connection.release();
+
+                await pool.execute(
+                    'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
+                    [assessment_id]
+                );
                 
                 // Update analytics
                 await updateGradeAnalytics(
@@ -322,10 +342,11 @@ router.post('/grades/record',
                 
                 res.json({
                     success: true,
-                    message: `Grades recorded for ${grades.length} student(s)`,
+                    message: `Grades submitted for admin approval for ${grades.length} student(s)`,
                     data: {
                         assessment_id,
-                        grades_processed: grades.length
+                        grades_processed: grades.length,
+                        approval_status: 'pending'
                     }
                 });
                 
@@ -339,6 +360,74 @@ router.post('/grades/record',
             console.error('Error recording grades:', error);
             throw error;
         }
+    })
+);
+
+router.get('/assessments/pending-approval',
+    Auth.authenticateToken,
+    asyncHandler(async (req, res) => {
+        if (req.user.role !== 'admin') {
+            throw new AuthorizationError('Only admins can review pending assessment approvals');
+        }
+
+        const academic_year = req.query.academic_year || '2024-2025';
+
+        const [assessments] = await pool.execute(`
+            SELECT a.*, s.name as subject_name, s.code as subject_code,
+                   c.name as class_name,
+                   u.first_name as teacher_first_name,
+                   u.last_name as teacher_last_name,
+                   COUNT(am.id) as total_students,
+                   COUNT(CASE WHEN am.marks_obtained IS NOT NULL OR am.is_present = FALSE THEN 1 END) as graded_count
+            FROM assessments a
+            INNER JOIN subjects s ON a.subject_id = s.id
+            INNER JOIN classes c ON a.class_id = c.id
+            INNER JOIN users u ON a.teacher_id = u.id
+            LEFT JOIN assessment_marks am ON a.id = am.assessment_id
+            WHERE a.academic_year = ?
+              AND (a.is_published = FALSE OR a.is_published IS NULL)
+            GROUP BY a.id
+            ORDER BY a.updated_at DESC, a.created_at DESC
+        `, [academic_year]);
+
+        res.json({
+            success: true,
+            data: assessments,
+        });
+    })
+);
+
+router.post('/assessments/:id/approve',
+    Auth.authenticateToken,
+    asyncHandler(async (req, res) => {
+        if (req.user.role !== 'admin') {
+            throw new AuthorizationError('Only admins can approve assessment results');
+        }
+
+        const { id } = req.params;
+
+        const [assessments] = await pool.execute(
+            'SELECT id, is_published FROM assessments WHERE id = ? LIMIT 1',
+            [id]
+        );
+
+        if (assessments.length === 0) {
+            throw new NotFoundError('Assessment not found');
+        }
+
+        await pool.execute(
+            'UPDATE assessments SET is_published = TRUE, is_final = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [id]
+        );
+
+        res.json({
+            success: true,
+            message: 'Assessment results approved successfully',
+            data: {
+                assessment_id: Number(id),
+                approval_status: 'approved',
+            },
+        });
     })
 );
 

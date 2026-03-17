@@ -465,6 +465,7 @@ const ResponsiveNavigation = ({
           { id: 'my-classes', label: 'My Classes', icon: '🚪', action: () => navigate('/classes') },
           { id: 'subjects', label: 'Subjects', icon: '📚', action: () => setActiveMenu('subjects') },
           { id: 'grades', label: 'Grades', icon: '📊', action: () => setActiveMenu('grades') },
+          { id: 'results', label: 'Results', icon: '📄', action: () => setActiveMenu('results') },
           { id: 'attendance', label: 'Attendance', icon: '📋', action: () => setActiveMenu('attendance') },
           { id: 'analytics-reports', label: 'Analytics & Reports', icon: '📈', action: () => setActiveMenu('analytics-reports') }
         ]

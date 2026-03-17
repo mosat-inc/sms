@@ -387,6 +387,11 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
 
         const assessmentId = result.insertId;
 
+        await connection.execute(
+            'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
+            [assessmentId]
+        );
+
         // Get all students in the class and create assessment_marks entries
         const [students] = await connection.execute(`
             SELECT id FROM students 
@@ -600,6 +605,8 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
                 WHEN status = 'draft' THEN 'completed' 
                 ELSE status 
             END,
+            is_published = FALSE,
+            is_final = FALSE,
             updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         `, [id]);
@@ -608,7 +615,12 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Marks updated successfully'
+            message: 'Marks submitted for admin approval successfully',
+            data: {
+                assessment_id: parseInt(id, 10),
+                students_updated: student_marks.length,
+                approval_status: 'pending'
+            }
         });
 
     } catch (error) {
@@ -709,6 +721,14 @@ router.get('/:id/results', Auth.authenticateToken, async (req, res) => {
         }
 
         const assessment = assessments[0];
+
+        if (req.user.role !== 'admin' && !assessment.is_published) {
+            connection.release();
+            return res.status(403).json({
+                success: false,
+                message: 'Results are pending admin approval and are not visible yet'
+            });
+        }
 
         // Get all student results for this assessment
         const [results] = await connection.execute(`

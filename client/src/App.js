@@ -232,7 +232,16 @@ function App() {
               path="/grades" 
               element={
                 <ProtectedRoute>
-                  <GradesMenu />
+                  <GradesMenu mode="grades" />
+                </ProtectedRoute>
+              } 
+            />
+
+            <Route 
+              path="/results" 
+              element={
+                <ProtectedRoute>
+                  <GradesMenu mode="results" />
                 </ProtectedRoute>
               } 
             />

@@ -603,12 +603,15 @@ const MarksEntrySection = styled(Section)`
   }
 `;
 
-const GradesMenu = () => {
-  const { api } = useAuth();
+const GradesMenu = ({ mode = 'grades' }) => {
+  const { api, user } = useAuth();
   const [searchParams] = useSearchParams();
   const requestedClassId = searchParams.get('class_id') || '';
-  const [activeTab, setActiveTab] = useState('assessments');
+  const isResultsMode = mode === 'results';
+  const isGradesMode = !isResultsMode;
+  const [activeTab, setActiveTab] = useState(isResultsMode ? 'assessments' : 'assessments');
   const [assessments, setAssessments] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [students, setStudents] = useState([]);
   const [grades, setGrades] = useState({});
@@ -653,6 +656,7 @@ const GradesMenu = () => {
 
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
+  const isAdmin = user?.role === 'admin';
 
   // Helper function to calculate letter grade based on percentage
   const calculateLetterGrade = (percentage) => {
@@ -682,6 +686,13 @@ const GradesMenu = () => {
   }, []);
 
   useEffect(() => {
+    setActiveTab('assessments');
+    setViewingResults(false);
+    setViewingAnalytics(false);
+    setSelectedAssessment(null);
+  }, [mode]);
+
+  useEffect(() => {
     if (!requestedClassId) return;
     setAnalyticsFilters((prev) => {
       if (String(prev.class_id || '') === String(requestedClassId)) return prev;
@@ -708,6 +719,12 @@ const GradesMenu = () => {
       fetchAssessments();
     }
   }, [activeTab, analyticsFilters]);
+
+  useEffect(() => {
+    if (isGradesMode && isAdmin && activeTab === 'pending-approvals') {
+      fetchPendingApprovals();
+    }
+  }, [activeTab, isGradesMode, isAdmin]);
 
   // Load analytics data when the analytics tab is accessed
   useEffect(() => {
@@ -776,6 +793,10 @@ const GradesMenu = () => {
         if (value) queryParams.append(key, value);
       });
 
+      if (isResultsMode) {
+        queryParams.set('published_only', 'true');
+      }
+
       console.log('Fetching assessments with filters:', analyticsFilters);
       
       const response = await api.get(`/api/grades/assessments/my-assessments?${queryParams}`);
@@ -784,7 +805,11 @@ const GradesMenu = () => {
       if (result?.success) {
         setAssessments(result.data || []);
         if ((result.data || []).length === 0 && !isCreatingAssessment) {
-          toast.info('No assessments found. Create your first assessment to get started!');
+          toast.info(
+            isResultsMode
+              ? 'No approved results are available yet.'
+              : 'No assessments found. Create your first assessment to get started!'
+          );
         }
       } else {
         toast.error(result?.message || 'Failed to fetch assessments');
@@ -794,6 +819,41 @@ const GradesMenu = () => {
       toast.error('Network error. Please check your connection and try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPendingApprovals = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/grades/assessments/pending-approval?academic_year=2024-2025');
+      const result = response.data;
+      if (result?.success) {
+        setPendingApprovals(result.data || []);
+      } else {
+        toast.error(result?.message || 'Failed to fetch pending approvals');
+      }
+    } catch (error) {
+      console.error('Error fetching pending approvals:', error);
+      toast.error('Failed to fetch pending approvals');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approveAssessment = async (assessmentId) => {
+    try {
+      const response = await api.post(`/api/grades/assessments/${assessmentId}/approve`);
+      const result = response.data;
+      if (result?.success) {
+        toast.success(result?.message || 'Assessment approved successfully');
+        setPendingApprovals((prev) => prev.filter((item) => Number(item.id) !== Number(assessmentId)));
+        fetchAssessments();
+      } else {
+        toast.error(result?.message || 'Failed to approve assessment');
+      }
+    } catch (error) {
+      console.error('Error approving assessment:', error);
+      toast.error(error.response?.data?.message || 'Failed to approve assessment');
     }
   };
 
@@ -866,7 +926,7 @@ const GradesMenu = () => {
       });
 
       if (response.data?.success !== false) {
-        toast.success(response.data?.message || 'Grades saved successfully');
+        toast.success(response.data?.message || 'Grades submitted for admin approval');
         // Refresh the assessment details to show updated grades
         fetchAssessmentDetails(selectedAssessment.id);
         // Refresh the assessments list to update grading progress
@@ -898,7 +958,7 @@ const GradesMenu = () => {
       }
     } catch (error) {
       console.error('Error fetching results:', error);
-      toast.error('Failed to fetch assessment results');
+      toast.error(error.response?.data?.message || 'Failed to fetch assessment results');
     } finally {
       setLoading(false);
     }
@@ -1368,6 +1428,7 @@ const GradesMenu = () => {
               class_name: classes.find(c => c.id == analyticsFilters.class_id)?.name || 'Unknown Class',
               total_marks: newAssessmentData.total_marks,
               assessment_date: newAssessmentData.assessment_date,
+              is_published: false,
               grading_progress: {
                 completion_percentage: 0, // Will be updated by fetchAssessments
                 graded_count: 0,
@@ -1384,7 +1445,7 @@ const GradesMenu = () => {
               fetchAssessments(); // This will replace the optimistic data with real data
             }, 300);
             
-            toast.success('Assessment created and marks saved successfully!');
+            toast.success(marksResponse.data?.message || 'Assessment created and marks submitted for admin approval');
           } else {
             toast.error('Assessment created but failed to save marks');
           }
@@ -2030,11 +2091,13 @@ const GradesMenu = () => {
           </select>
         </div>
 
-        <div className="action-buttons">
-          <PrimaryButton type="button" onClick={createNewAssessment}>
-            <FaPlus /> Create Assessment
-          </PrimaryButton>
-        </div>
+        {isGradesMode && (
+          <div className="action-buttons">
+            <PrimaryButton type="button" onClick={createNewAssessment}>
+              <FaPlus /> Create Assessment
+            </PrimaryButton>
+          </div>
+        )}
       </FilterSection>
 
       {loading ? (
@@ -2046,8 +2109,25 @@ const GradesMenu = () => {
           {assessments.map(assessment => (
             <AssessmentCard key={assessment.id}>
               <div className="assessment-header">
-                <h4>{assessment.title}</h4>
-                <div className="assessment-type">{assessment.assessment_type}</div>
+                <h4>{assessment.title || assessment.assessment_name}</h4>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div className="assessment-type">{assessment.assessment_type || assessment.exam_type}</div>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 10px',
+                      borderRadius: borderRadius.pill,
+                      background: assessment.is_published ? 'rgba(34,197,94,0.14)' : 'rgba(245,158,11,0.14)',
+                      color: assessment.is_published ? '#166534' : '#9a3412',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {assessment.is_published ? 'Approved' : 'Pending Approval'}
+                  </div>
+                </div>
               </div>
               
               <div className="assessment-info">
@@ -2077,17 +2157,74 @@ const GradesMenu = () => {
               </div>
 
               <div className="assessment-actions">
-                <button 
-                  className="view"
-                  onClick={() => fetchAssessmentResults(assessment.id)}
-                >
-                  <FaEye /> View Results
-                </button>
-                <button 
-                  className="analytics"
-                  onClick={() => fetchAssessmentAnalytics(assessment.id)}
-                >
-                  <FaChartBar /> Analytics
+                {isGradesMode ? (
+                  <button
+                    className="view"
+                    onClick={() => fetchAssessmentDetails(assessment.id)}
+                  >
+                    <FaEdit /> Enter Marks
+                  </button>
+                ) : (
+                  <>
+                    <button 
+                      className="view"
+                      onClick={() => fetchAssessmentResults(assessment.id)}
+                    >
+                      <FaEye /> View Results
+                    </button>
+                    <button 
+                      className="analytics"
+                      onClick={() => fetchAssessmentAnalytics(assessment.id)}
+                    >
+                      <FaChartBar /> Analytics
+                    </button>
+                  </>
+                )}
+              </div>
+            </AssessmentCard>
+          ))}
+        </AssessmentsGrid>
+      )}
+    </>
+  );
+
+  const renderPendingApprovalsTab = () => (
+    <>
+      <InfoMessage>
+        <span style={{ display: 'inline-flex', fontSize: '1.1rem' }}>
+          <FaInfoCircle />
+        </span>
+        <span>Assessments listed here have submitted marks and are waiting for admin approval before they appear under Results.</span>
+      </InfoMessage>
+
+      {loading ? (
+        <LoadingSpinner>
+          <div className="spinner"></div>
+        </LoadingSpinner>
+      ) : pendingApprovals.length === 0 ? (
+        <Section style={{ textAlign: 'center' }}>
+          <FaCheckCircle size={48} style={{ marginBottom: '16px', color: colors.success }} />
+          <h3 style={{ marginBottom: 8, color: colors.textPrimary }}>No Pending Approvals</h3>
+          <p style={{ margin: 0, color: colors.textSecondary }}>All submitted assessments have already been reviewed.</p>
+        </Section>
+      ) : (
+        <AssessmentsGrid>
+          {pendingApprovals.map((assessment) => (
+            <AssessmentCard key={assessment.id}>
+              <div className="assessment-header">
+                <h4>{assessment.title || assessment.assessment_name}</h4>
+                <div className="assessment-type">Pending Approval</div>
+              </div>
+
+              <div className="assessment-info">
+                <p><FaUsers /> {assessment.subject_name} - {assessment.class_name}</p>
+                <p><FaTasks /> {assessment.graded_count || 0} of {assessment.total_students || 0} students graded</p>
+                <p><FaCalendarAlt /> Teacher: {assessment.teacher_first_name} {assessment.teacher_last_name}</p>
+              </div>
+
+              <div className="assessment-actions">
+                <button className="view" onClick={() => approveAssessment(assessment.id)}>
+                  <FaCheckCircle /> Approve Results
                 </button>
               </div>
             </AssessmentCard>
@@ -2115,7 +2252,7 @@ const GradesMenu = () => {
         <div className="table-header">
           <h4>
             <FaEdit />
-            Grading: {selectedAssessment.title} ({selectedAssessment.total_marks} marks)
+            Grading: {selectedAssessment.title || selectedAssessment.assessment_name} ({selectedAssessment.total_marks || selectedAssessment.max_marks} marks)
           </h4>
           <button 
             className="save-button" 
@@ -3817,10 +3954,19 @@ const GradesMenu = () => {
       <Header>
         <h1>
           <FaGraduationCap />
-          Grades Management
+          {isResultsMode ? 'Results Center' : 'Grades Management'}
         </h1>
-        <p>Record, manage, and analyze student grades for assessments, tests, and exams</p>
-        <p>Track student performance and generate comprehensive grade reports</p>
+        {isResultsMode ? (
+          <>
+            <p>View approved subject results, performance summaries, and analysis.</p>
+            <p>Only admin-approved assessments appear in this section.</p>
+          </>
+        ) : (
+          <>
+            <p>Create assessments, enter marks, and submit them for admin approval.</p>
+            <p>Use this section for grading work, not for publishing final results.</p>
+          </>
+        )}
       </Header>
 
       <TabsContainer>
@@ -3834,44 +3980,69 @@ const GradesMenu = () => {
               setViewingAnalytics(false);
             }}
           >
-            <FaTasks /> My Assessments
+            <FaTasks /> {isResultsMode ? 'Approved Results' : 'My Assessments'}
           </div>
-          <div 
-            className={`tab ${activeTab === 'create-assessment' ? 'active' : ''}`}
-            onClick={() => setActiveTab('create-assessment')}
-            style={{ display: isCreatingAssessment ? 'flex' : 'none' }}
-          >
-            <FaPlus /> Create New Assessment
-          </div>
-          <div 
-            className={`tab ${activeTab === 'view-results' ? 'active' : ''}`}
-            onClick={() => setActiveTab('view-results')}
-            style={{ display: viewingResults ? 'flex' : 'none' }}
-          >
-            <FaEye /> View Results
-          </div>
-          <div 
-            className={`tab ${activeTab === 'view-analytics' ? 'active' : ''}`}
-            onClick={() => setActiveTab('view-analytics')}
-            style={{ display: viewingAnalytics ? 'flex' : 'none' }}
-          >
-            <FaChartBar /> Analytics
-          </div>
+          {isGradesMode && (
+            <div 
+              className={`tab ${activeTab === 'create-assessment' ? 'active' : ''}`}
+              onClick={() => setActiveTab('create-assessment')}
+              style={{ display: isCreatingAssessment ? 'flex' : 'none' }}
+            >
+              <FaPlus /> Create Assessment
+            </div>
+          )}
+          {isGradesMode && (
+            <div 
+              className={`tab ${activeTab === 'grading' ? 'active' : ''}`}
+              onClick={() => setActiveTab('grading')}
+              style={{ display: selectedAssessment ? 'flex' : 'none' }}
+            >
+              <FaEdit /> Marks Entry
+            </div>
+          )}
+          {viewingResults && (
+            <div 
+              className={`tab ${activeTab === 'view-results' ? 'active' : ''}`}
+              onClick={() => setActiveTab('view-results')}
+              style={{ display: viewingResults ? 'flex' : 'none' }}
+            >
+              <FaEye /> View Results
+            </div>
+          )}
+          {viewingAnalytics && (
+            <div 
+              className={`tab ${activeTab === 'view-analytics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('view-analytics')}
+              style={{ display: viewingAnalytics ? 'flex' : 'none' }}
+            >
+              <FaChartBar /> Analytics
+            </div>
+          )}
           <div 
             className={`tab ${activeTab === 'analytics' ? 'active' : ''}`}
             onClick={() => setActiveTab('analytics')}
           >
-            <FaChartBar /> Analytics & Reports
+            <FaChartBar /> {isResultsMode ? 'Results Analysis' : 'Performance Analytics'}
           </div>
+          {isGradesMode && isAdmin && (
+            <div 
+              className={`tab ${activeTab === 'pending-approvals' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pending-approvals')}
+            >
+              <FaCheckCircle /> Pending Approval
+            </div>
+          )}
         </div>
       </TabsContainer>
 
       <ContentSection>
         {activeTab === 'assessments' && renderAssessmentsTab()}
         {activeTab === 'create-assessment' && renderCreateAssessmentTab()}
+        {activeTab === 'grading' && renderGradingTab()}
         {activeTab === 'view-results' && renderViewResultsTab()}
         {activeTab === 'view-analytics' && renderViewAnalyticsTab()}
         {activeTab === 'analytics' && renderAnalyticsTab()}
+        {activeTab === 'pending-approvals' && renderPendingApprovalsTab()}
       </ContentSection>
     </GradesMenuContainer>
   );

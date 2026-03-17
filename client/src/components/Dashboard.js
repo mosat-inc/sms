@@ -484,6 +484,7 @@ const Dashboard = () => {
 	        { id: 'timetable', icon: 'fas fa-calendar-alt', text: 'Timetable', action: () => setActiveMenu('timetable') },
 	        { id: 'subjects', icon: 'fas fa-book', text: 'Subjects', action: () => setActiveMenu('subjects') },
 	        { id: 'grades', icon: 'fas fa-chart-bar', text: 'Grades', action: () => setActiveMenu('grades') },
+	        { id: 'results', icon: 'fas fa-poll', text: 'Results', action: () => setActiveMenu('results') },
 	        { id: 'attendance', icon: 'fas fa-clipboard-check', text: 'Attendance', action: () => setActiveMenu('attendance') },
           { id: 'staff-attendance', icon: 'fas fa-user-check', text: 'Staff Attendance', action: () => setActiveMenu('staff-attendance') },
           { id: 'discipline', icon: 'fas fa-gavel', text: 'Discipline', action: () => setActiveMenu('discipline') },
@@ -592,7 +593,9 @@ const Dashboard = () => {
 	      case 'subjects':
 	        return <SubjectsMenu />;
 	      case 'grades':
-	        return <GradesMenu />;
+	        return <GradesMenu mode="grades" />;
+	      case 'results':
+	        return <GradesMenu mode="results" />;
 	      case 'timetable':
 	        return <Timetable />;
 	      case 'analytics-reports':

@@ -418,7 +418,7 @@ const ClassDashboard = () => {
       return;
     }
     if (action === 'exams') {
-      navigate(`/grades?class_id=${classId}`);
+      navigate(`/results?class_id=${classId}`);
       return;
     }
     navigate(`/classes/${classId}/${action}`);
