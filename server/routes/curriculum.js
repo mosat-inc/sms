@@ -112,6 +112,15 @@ router.get('/topics', authenticateToken, async (req, res) => {
             requestedAcademicYear
         );
 
+        console.log('📘 CURRICULUM TOPICS ACCESS', {
+            teacherId,
+            subject_id: Number(subject_id),
+            class_id: isValidParam(class_id) ? Number(class_id) : null,
+            requestedAcademicYear,
+            effectiveAcademicYear,
+            role: req.user.role,
+        });
+
         if (!effectiveAcademicYear && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
@@ -282,6 +291,15 @@ router.post('/topics/create', authenticateToken, async (req, res) => {
             class_id,
             requestedAcademicYear
         );
+
+        console.log('📘 CURRICULUM CREATE ACCESS', {
+            teacherId,
+            subject_id: Number(subject_id),
+            class_id: isValidParam(class_id) ? Number(class_id) : null,
+            requestedAcademicYear,
+            effectiveAcademicYear,
+            role: req.user.role,
+        });
 
         if (!effectiveAcademicYear) {
             return res.status(403).json({
@@ -820,8 +838,13 @@ router.get('/progress/summary', authenticateToken, async (req, res) => {
         const {
             subject_id,
             class_id,
-            academic_year = '2024-2025'
+            academic_year
         } = req.query;
+
+        const requestedAcademicYear = academic_year || await getCurrentAcademicYearName();
+        const effectiveAcademicYear = subject_id
+            ? await resolveTeacherSubjectAcademicYear(teacherId, subject_id, class_id, requestedAcademicYear)
+            : requestedAcademicYear;
 
         let query = `
             SELECT 
@@ -844,7 +867,7 @@ router.get('/progress/summary', authenticateToken, async (req, res) => {
             WHERE ct.teacher_id = ? AND ct.academic_year = ?
         `;
 
-        const params = [teacherId, academic_year];
+        const params = [teacherId, effectiveAcademicYear || requestedAcademicYear];
 
         if (subject_id) {
             query += ` AND ct.subject_id = ?`;
@@ -882,7 +905,7 @@ router.get('/progress/summary', authenticateToken, async (req, res) => {
         res.json({
             success: true,
             data: transformedSummary,
-            academic_year
+            academic_year: effectiveAcademicYear || requestedAcademicYear
         });
 
     } catch (error) {
@@ -902,7 +925,7 @@ router.get('/progress/report', authenticateToken, async (req, res) => {
         const {
             subject_id,
             class_id,
-            academic_year = '2024-2025',
+            academic_year,
             format = 'json'
         } = req.query;
 
@@ -910,6 +933,21 @@ router.get('/progress/report', authenticateToken, async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Subject ID is required'
+            });
+        }
+
+        const requestedAcademicYear = academic_year || await getCurrentAcademicYearName();
+        const effectiveAcademicYear = await resolveTeacherSubjectAcademicYear(
+            teacherId,
+            subject_id,
+            class_id,
+            requestedAcademicYear
+        );
+
+        if (!effectiveAcademicYear && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. You are not assigned to this subject.'
             });
         }
 
@@ -943,8 +981,8 @@ router.get('/progress/report', authenticateToken, async (req, res) => {
         `;
 
         const params = class_id 
-            ? [teacherId, subject_id, academic_year, class_id]
-            : [teacherId, subject_id, academic_year];
+            ? [teacherId, subject_id, effectiveAcademicYear || requestedAcademicYear, class_id]
+            : [teacherId, subject_id, effectiveAcademicYear || requestedAcademicYear];
 
         const [topics] = await pool.execute(query, params);
 
@@ -958,7 +996,7 @@ router.get('/progress/report', authenticateToken, async (req, res) => {
                 id: class_id,
                 name: topics[0].class_name
             } : null,
-            academic_year,
+            academic_year: effectiveAcademicYear || requestedAcademicYear,
             generated_at: new Date().toISOString(),
             summary: {
                 total_topics: topics.length,
