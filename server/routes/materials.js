@@ -54,6 +54,14 @@ const normalizeMaterialTags = (rawTags) => {
     return [];
 };
 
+const getMaterialStorageStatus = (filePath) => {
+    const fileInfo = getFileInfo(filePath);
+    return {
+        exists: fileInfo.exists,
+        size: fileInfo.size || 0
+    };
+};
+
 // Get teacher's materials with filtering and pagination
 router.get('/my-materials', 
     authenticateToken,
@@ -71,13 +79,26 @@ router.get('/my-materials',
         } = req.query;
         
         console.log('Fetching materials for teacher:', teacherId);
+
+        let classLevelFilter = null;
+        if (isValidParam(class_id)) {
+            const [classRows] = await pool.query(
+                'SELECT level FROM classes WHERE id = ? LIMIT 1',
+                [Number(class_id)]
+            );
+            classLevelFilter = classRows.length > 0 ? classRows[0].level : null;
+        }
         
         // Build query
         let query = `
-            SELECT tm.*, s.name as subject_name, s.code as subject_code, c.name as class_name
+            SELECT tm.*, s.name as subject_name, s.code as subject_code, c.class_name
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
-            LEFT JOIN classes c ON tm.class_level = c.level
+            LEFT JOIN (
+                SELECT level, MIN(name) as class_name
+                FROM classes
+                GROUP BY level
+            ) c ON tm.class_level = c.level
             WHERE tm.teacher_id = ?
         `;
         const params = [teacherId];
@@ -92,9 +113,9 @@ router.get('/my-materials',
             params.push(category);
         }
         
-        if (isValidParam(class_id)) {
-            query += ` AND c.id = ?`;
-            params.push(Number(class_id));
+        if (classLevelFilter !== null) {
+            query += ` AND tm.class_level = ?`;
+            params.push(classLevelFilter);
         }
         
         if (isValidParam(search)) {
@@ -117,7 +138,6 @@ router.get('/my-materials',
         let countQuery = `
             SELECT COUNT(*) as total 
             FROM teaching_materials tm
-            LEFT JOIN classes c ON tm.class_level = c.level
             WHERE tm.teacher_id = ?
         `;
         const countParams = [teacherId];
@@ -132,9 +152,9 @@ router.get('/my-materials',
             countParams.push(category);
         }
         
-        if (isValidParam(class_id)) {
-            countQuery += ` AND c.id = ?`;
-            countParams.push(Number(class_id));
+        if (classLevelFilter !== null) {
+            countQuery += ` AND tm.class_level = ?`;
+            countParams.push(classLevelFilter);
         }
         
         if (isValidParam(search)) {
@@ -147,7 +167,9 @@ router.get('/my-materials',
         const total = countResult[0].total;
 
         // Transform data for frontend
-        const transformedMaterials = materials.map(material => ({
+        const transformedMaterials = materials.map(material => {
+            const storage = getMaterialStorageStatus(material.file_path);
+            return {
             id: material.id,
             title: material.title,
             description: material.description,
@@ -162,8 +184,10 @@ router.get('/my-materials',
             isPublic: material.is_public,
             downloadCount: material.download_count || material.total_downloads || 0,
             uploadDate: material.created_at,
-            tags: normalizeMaterialTags(material.tags)
-        }));
+            tags: normalizeMaterialTags(material.tags),
+            fileAvailable: storage.exists
+            };
+        });
 
         res.json({
             success: true,
@@ -321,15 +345,55 @@ router.post('/upload', authenticateToken, uploadMaterials.array('materials', 10)
                 console.log('⚡ Checking for existing file...');
                 // Check if this exact file already exists for this teacher
                 const [existingFiles] = await connection.execute(`
-                    SELECT id FROM teaching_materials 
+                    SELECT id, file_path FROM teaching_materials 
                     WHERE teacher_id = ? AND original_name = ? AND file_size = ? AND mime_type = ?
+                    ORDER BY id DESC
                 `, [teacherId, originalname, size, mimetype]);
                 
                 if (existingFiles.length > 0) {
+                    const existingMaterial = existingFiles[0];
+                    const existingStorage = getMaterialStorageStatus(existingMaterial.file_path);
+
+                    if (!existingStorage.exists) {
+                        console.warn(`⚠️ Existing material file missing on disk. Replacing stored file for material ${existingMaterial.id}`);
+
+                        await connection.execute(`
+                            UPDATE teaching_materials
+                            SET subject_id = ?, title = ?, description = ?, file_name = ?, original_name = ?,
+                                file_path = ?, file_type = ?, file_size = ?, mime_type = ?, category = ?,
+                                class_level = ?, is_public = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        `, [
+                            subject_id || null,
+                            title,
+                            description,
+                            filename,
+                            originalname,
+                            filePath,
+                            fileExtension,
+                            size,
+                            mimetype,
+                            category,
+                            class_level_value || null,
+                            is_public === 'true' || is_public === true,
+                            tags ? JSON.stringify(tags.split(',')) : null,
+                            existingMaterial.id
+                        ]);
+
+                        uploadedMaterials.push({
+                            id: existingMaterial.id,
+                            title,
+                            fileName: originalname,
+                            fileSize: size,
+                            category
+                        });
+
+                        continue;
+                    }
+
                     console.warn(`⚠️ Skipping duplicate file: ${originalname} already exists for teacher ${teacherId}`);
-                    // Delete the uploaded file since it's a duplicate
                     deleteFile(filePath);
-                    continue; // Skip to next file
+                    continue;
                 }
                 
                 console.log('⚡ Inserting into database...');
