@@ -4018,12 +4018,14 @@ const GradesMenu = ({ mode = 'grades' }) => {
               <FaChartBar /> Analytics
             </div>
           )}
-          <div 
-            className={`tab ${activeTab === 'analytics' ? 'active' : ''}`}
-            onClick={() => setActiveTab('analytics')}
-          >
-            <FaChartBar /> {isResultsMode ? 'Results Analysis' : 'Performance Analytics'}
-          </div>
+          {isResultsMode && (
+            <div 
+              className={`tab ${activeTab === 'analytics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
+            >
+              <FaChartBar /> Results Analysis
+            </div>
+          )}
           {isGradesMode && isAdmin && (
             <div 
               className={`tab ${activeTab === 'pending-approvals' ? 'active' : ''}`}
@@ -4041,7 +4043,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
         {activeTab === 'grading' && renderGradingTab()}
         {activeTab === 'view-results' && renderViewResultsTab()}
         {activeTab === 'view-analytics' && renderViewAnalyticsTab()}
-        {activeTab === 'analytics' && renderAnalyticsTab()}
+        {activeTab === 'analytics' && isResultsMode && renderAnalyticsTab()}
         {activeTab === 'pending-approvals' && renderPendingApprovalsTab()}
       </ContentSection>
     </GradesMenuContainer>
