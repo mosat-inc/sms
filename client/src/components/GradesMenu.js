@@ -728,12 +728,12 @@ const GradesMenu = ({ mode = 'grades' }) => {
   const [gradeAnalysisLoading, setGradeAnalysisLoading] = useState(false);
   const [gradeAnalysisError, setGradeAnalysisError] = useState(null);
   
-  const examTypes = ['mid-term exams', 'terminal exams', 'annual exams', 'mock exams'];
+  const examTypes = ['mid term test 1', 'mid term test 2', 'terminal exams', 'annual exams', 'mock exams'];
   const resultsCategoryOptions = [
     {
       value: 'assessment',
       label: 'Assessments',
-      description: 'Show approved class assessments such as mid-term, tests, quizzes, and mock exams. Terminal and annual results are excluded.'
+      description: 'Show approved class assessments such as mid term tests, quizzes, and mock exams. Terminal and annual results are excluded.'
     },
     {
       value: 'terminal',

@@ -115,7 +115,7 @@ const createAssessmentSchema = Joi.object({
     class_id: Joi.number().integer().positive().required(),
     subject_id: Joi.number().integer().positive().required(),
     assessment_name: Joi.string().min(3).max(255).required(),
-    exam_type: Joi.string().valid('mid-term exams', 'terminal exams', 'annual exams', 'mock exams').required(),
+    exam_type: Joi.string().valid('mid term test 1', 'mid term test 2', 'terminal exams', 'annual exams', 'mock exams').required(),
     assessment_date: Joi.date().iso().required(),
     max_marks: Joi.number().integer().min(1).max(100).default(100),
     pass_marks: Joi.number().integer().min(1).max(100).default(40),
