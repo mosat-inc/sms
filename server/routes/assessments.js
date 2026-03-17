@@ -4,6 +4,37 @@ const Auth = require('../utils/auth');
 const { pool } = require('../config/database');
 const router = express.Router();
 
+let assessmentsSchemaCache = { kind: null, fields: null, checkedAt: 0 };
+const ASSESSMENTS_SCHEMA_CACHE_MS = 5 * 60 * 1000;
+
+const getAssessmentsSchemaMeta = async (connection) => {
+    const now = Date.now();
+    if (assessmentsSchemaCache.kind && assessmentsSchemaCache.fields && now - assessmentsSchemaCache.checkedAt < ASSESSMENTS_SCHEMA_CACHE_MS) {
+        return assessmentsSchemaCache;
+    }
+
+    const [cols] = await connection.execute('SHOW COLUMNS FROM assessments');
+    const fields = new Set((cols || []).map((col) => col.Field));
+    const kind = fields.has('assessment_name') || fields.has('exam_type') ? 'legacy' : 'grades_module';
+
+    assessmentsSchemaCache = {
+        kind,
+        fields,
+        checkedAt: now,
+    };
+
+    return assessmentsSchemaCache;
+};
+
+const isAssessmentPublished = (assessment, schemaMeta) => {
+    if (schemaMeta.fields.has('is_published')) {
+        return Boolean(assessment.is_published);
+    }
+
+    const status = String(assessment.status || '').toLowerCase();
+    return status === 'published' || status === 'closed';
+};
+
 // Validation schemas
 const createAssessmentSchema = Joi.object({
     class_id: Joi.number().integer().positive().required(),
@@ -56,6 +87,7 @@ router.get('/teacher/classes', Auth.authenticateToken, async (req, res) => {
         }
 
         const connection = await pool.getConnection();
+        const schemaMeta = await getAssessmentsSchemaMeta(connection);
         
         // First try to get assigned classes
         const assignedQuery = `
@@ -394,10 +426,12 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
 
         const assessmentId = result.insertId;
 
-        await connection.execute(
-            'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
-            [assessmentId]
-        );
+        if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
+            await connection.execute(
+                'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
+                [assessmentId]
+            );
+        }
 
         // Get all students in the class and create assessment_marks entries
         const [students] = await connection.execute(`
@@ -551,6 +585,7 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
 
         const { student_marks } = value;
         const connection = await pool.getConnection();
+        const schemaMeta = await getAssessmentsSchemaMeta(connection);
 
         // Verify teacher owns this assessment
         const [assessments] = await connection.execute(`
@@ -614,17 +649,30 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
         await Promise.all(updatePromises);
 
         // Update assessment status to completed if it was draft
-        await connection.execute(`
-            UPDATE assessments 
-            SET status = CASE 
-                WHEN status = 'draft' THEN 'completed' 
-                ELSE status 
-            END,
-            is_published = FALSE,
-            is_final = FALSE,
-            updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `, [id]);
+        if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
+            await connection.execute(`
+                UPDATE assessments 
+                SET status = CASE 
+                    WHEN status = 'draft' THEN 'completed' 
+                    ELSE status 
+                END,
+                is_published = FALSE,
+                is_final = FALSE,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `, [id]);
+        } else {
+            await connection.execute(`
+                UPDATE assessments 
+                SET status = CASE 
+                    WHEN status = 'draft' THEN 'completed' 
+                    WHEN status = 'published' THEN 'completed'
+                    ELSE status 
+                END,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `, [id]);
+        }
 
         connection.release();
 
@@ -710,6 +758,7 @@ router.get('/:id/results', Auth.authenticateToken, async (req, res) => {
 
         const { id } = req.params;
         const connection = await pool.getConnection();
+        const schemaMeta = await getAssessmentsSchemaMeta(connection);
 
         // Get assessment details
         const whereCondition = req.user.role === 'admin' ? 'WHERE a.id = ?' : 'WHERE a.id = ? AND a.teacher_id = ?';
@@ -737,7 +786,7 @@ router.get('/:id/results', Auth.authenticateToken, async (req, res) => {
 
         const assessment = assessments[0];
 
-        if (req.user.role !== 'admin' && !assessment.is_published) {
+        if (req.user.role !== 'admin' && !isAssessmentPublished(assessment, schemaMeta)) {
             connection.release();
             return res.status(403).json({
                 success: false,

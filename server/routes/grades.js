@@ -7,6 +7,32 @@ const { asyncHandler, NotFoundError, AuthorizationError } = require('../middlewa
 const { calculateLetterGrade, updateGradeAnalytics } = require('../config/grades-schema');
 const { createParentNotificationForStudent } = require('../services/notificationsService');
 
+let assessmentsSchemaCache = { kind: null, fields: null, checkedAt: 0 };
+const ASSESSMENTS_SCHEMA_CACHE_MS = 5 * 60 * 1000;
+
+const getAssessmentsSchemaMeta = async () => {
+    const now = Date.now();
+    if (assessmentsSchemaCache.kind && assessmentsSchemaCache.fields && now - assessmentsSchemaCache.checkedAt < ASSESSMENTS_SCHEMA_CACHE_MS) {
+        return assessmentsSchemaCache;
+    }
+
+    const [cols] = await pool.execute('SHOW COLUMNS FROM assessments');
+    const fields = new Set((cols || []).map((col) => col.Field));
+    const kind = fields.has('assessment_name') || fields.has('exam_type') ? 'legacy' : 'grades_module';
+    assessmentsSchemaCache = { kind, fields, checkedAt: now };
+    return assessmentsSchemaCache;
+};
+
+const normalizeAssessmentRecord = (assessment, schemaMeta) => ({
+    ...assessment,
+    title: assessment.title || assessment.assessment_name,
+    assessment_type: assessment.assessment_type || assessment.exam_type,
+    total_marks: assessment.total_marks || assessment.max_marks,
+    is_published: schemaMeta.fields.has('is_published')
+        ? Boolean(assessment.is_published)
+        : ['published', 'closed'].includes(String(assessment.status || '').toLowerCase()),
+});
+
 // ==================== ASSESSMENTS ENDPOINTS ====================
 
 // Create new assessment
@@ -92,6 +118,7 @@ router.get('/assessments/my-assessments',
             const class_id = req.query.class_id;
             const publishedOnly = String(req.query.published_only || '').toLowerCase() === 'true';
             const unpublishedOnly = String(req.query.unpublished_only || '').toLowerCase() === 'true';
+            const schemaMeta = await getAssessmentsSchemaMeta();
             
             let query = `
                 SELECT a.*, s.name as subject_name, s.code as subject_code,
@@ -124,11 +151,15 @@ router.get('/assessments/my-assessments',
             }
 
             if (publishedOnly) {
-                query += ' AND a.is_published = TRUE';
+                query += schemaMeta.fields.has('is_published')
+                    ? ' AND a.is_published = TRUE'
+                    : ` AND LOWER(COALESCE(a.status, '')) IN ('published', 'closed')`;
             }
 
             if (unpublishedOnly) {
-                query += ' AND (a.is_published = FALSE OR a.is_published IS NULL)';
+                query += schemaMeta.fields.has('is_published')
+                    ? ' AND (a.is_published = FALSE OR a.is_published IS NULL)'
+                    : ` AND LOWER(COALESCE(a.status, '')) NOT IN ('published', 'closed')`;
             }
             
             
@@ -141,17 +172,20 @@ router.get('/assessments/my-assessments',
             
             res.json({
                 success: true,
-                data: assessments.map(assessment => ({
-                    ...assessment,
+                data: assessments.map((assessment) => {
+                    const normalized = normalizeAssessmentRecord(assessment, schemaMeta);
+                    return {
+                    ...normalized,
                     grading_progress: {
-                        total_students: assessment.total_students,
-                        graded_count: assessment.graded_count,
-                        pending_count: assessment.total_students - assessment.graded_count,
-                        completion_percentage: assessment.total_students > 0 
-                            ? Math.round((assessment.graded_count / assessment.total_students) * 100)
+                        total_students: normalized.total_students,
+                        graded_count: normalized.graded_count,
+                        pending_count: normalized.total_students - normalized.graded_count,
+                        completion_percentage: normalized.total_students > 0 
+                            ? Math.round((normalized.graded_count / normalized.total_students) * 100)
                             : 0
                     }
-                }))
+                };
+                })
             });
             
         } catch (error) {
@@ -185,7 +219,8 @@ router.get('/assessments/:id',
                 throw new NotFoundError('Assessment not found or access denied');
             }
             
-            const assessment = assessments[0];
+            const schemaMeta = await getAssessmentsSchemaMeta();
+            const assessment = normalizeAssessmentRecord(assessments[0], schemaMeta);
             
             // Get students and their grades
             const [studentGrades] = await pool.execute(`
@@ -303,10 +338,17 @@ router.post('/grades/record',
                 await connection.commit();
                 connection.release();
 
-                await pool.execute(
-                    'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
-                    [assessment_id]
-                );
+                if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
+                    await pool.execute(
+                        'UPDATE assessments SET is_published = FALSE, is_final = FALSE WHERE id = ?',
+                        [assessment_id]
+                    );
+                } else if (schemaMeta.fields.has('status')) {
+                    await pool.execute(
+                        "UPDATE assessments SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [assessment_id]
+                    );
+                }
                 
                 // Update analytics
                 await updateGradeAnalytics(
@@ -383,9 +425,16 @@ router.get('/assessments/pending-approval',
         }
 
         const academic_year = req.query.academic_year || '2024-2025';
+        const schemaMeta = await getAssessmentsSchemaMeta();
+        const titleColumn = schemaMeta.fields.has('title') ? 'a.title' : 'a.assessment_name';
+        const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
+        const pendingFilter = schemaMeta.fields.has('is_published')
+            ? '(a.is_published = FALSE OR a.is_published IS NULL)'
+            : "LOWER(COALESCE(a.status, '')) NOT IN ('published', 'closed')";
 
         const [assessments] = await pool.execute(`
-            SELECT a.*, s.name as subject_name, s.code as subject_code,
+            SELECT a.*, ${titleColumn} as display_title, ${typeColumn} as display_type,
+                   s.name as subject_name, s.code as subject_code,
                    c.name as class_name,
                    u.first_name as teacher_first_name,
                    u.last_name as teacher_last_name,
@@ -397,14 +446,20 @@ router.get('/assessments/pending-approval',
             INNER JOIN users u ON a.teacher_id = u.id
             LEFT JOIN assessment_marks am ON a.id = am.assessment_id
             WHERE a.academic_year = ?
-              AND (a.is_published = FALSE OR a.is_published IS NULL)
+              AND ${pendingFilter}
             GROUP BY a.id
             ORDER BY a.updated_at DESC, a.created_at DESC
         `, [academic_year]);
 
         res.json({
             success: true,
-            data: assessments,
+            data: assessments.map((assessment) => ({
+                ...normalizeAssessmentRecord({
+                    ...assessment,
+                    title: assessment.display_title,
+                    assessment_type: assessment.display_type,
+                }, schemaMeta),
+            })),
         });
     })
 );
@@ -417,20 +472,25 @@ router.post('/assessments/:id/approve',
         }
 
         const { id } = req.params;
+        const schemaMeta = await getAssessmentsSchemaMeta();
 
-        const [assessments] = await pool.execute(
-            'SELECT id, is_published FROM assessments WHERE id = ? LIMIT 1',
-            [id]
-        );
+        const [assessments] = await pool.execute('SELECT * FROM assessments WHERE id = ? LIMIT 1', [id]);
 
         if (assessments.length === 0) {
             throw new NotFoundError('Assessment not found');
         }
 
-        await pool.execute(
-            'UPDATE assessments SET is_published = TRUE, is_final = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [id]
-        );
+        if (schemaMeta.fields.has('is_published') && schemaMeta.fields.has('is_final')) {
+            await pool.execute(
+                'UPDATE assessments SET is_published = TRUE, is_final = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [id]
+            );
+        } else if (schemaMeta.fields.has('status')) {
+            await pool.execute(
+                "UPDATE assessments SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [id]
+            );
+        }
 
         res.json({
             success: true,
