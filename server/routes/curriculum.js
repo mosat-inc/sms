@@ -9,6 +9,80 @@ const isValidParam = (param) => {
     return param !== null && param !== undefined && param !== 'undefined' && param !== '';
 };
 
+const getCurrentAcademicYearName = async () => {
+    try {
+        const [currentRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_current = TRUE AND is_active = TRUE
+             ORDER BY id DESC
+             LIMIT 1`
+        );
+
+        if (currentRows?.[0]?.year_name) {
+            return currentRows[0].year_name;
+        }
+
+        const [activeRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_active = TRUE
+             ORDER BY is_current DESC, id DESC
+             LIMIT 1`
+        );
+
+        if (activeRows?.[0]?.year_name) {
+            return activeRows[0].year_name;
+        }
+
+        const [anyRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             ORDER BY is_current DESC, is_active DESC, id DESC
+             LIMIT 1`
+        );
+
+        return anyRows?.[0]?.year_name || '2024-2025';
+    } catch (_error) {
+        return '2024-2025';
+    }
+};
+
+const resolveTeacherSubjectAcademicYear = async (teacherId, subjectId, classId, requestedAcademicYear) => {
+    const currentYearQuery = `
+        SELECT academic_year
+        FROM teacher_subject_assignments
+        WHERE teacher_id = ? AND subject_id = ?
+        ${isValidParam(classId) ? 'AND class_id = ?' : ''}
+          AND academic_year = ?
+        ORDER BY academic_year DESC
+        LIMIT 1
+    `;
+    const currentYearParams = isValidParam(classId)
+        ? [teacherId, Number(subjectId), Number(classId), requestedAcademicYear]
+        : [teacherId, Number(subjectId), requestedAcademicYear];
+    const [currentYearRows] = await pool.query(currentYearQuery, currentYearParams);
+
+    if (currentYearRows.length > 0) {
+        return currentYearRows[0].academic_year;
+    }
+
+    const fallbackQuery = `
+        SELECT academic_year
+        FROM teacher_subject_assignments
+        WHERE teacher_id = ? AND subject_id = ?
+        ${isValidParam(classId) ? 'AND class_id = ?' : ''}
+        ORDER BY academic_year DESC
+        LIMIT 1
+    `;
+    const fallbackParams = isValidParam(classId)
+        ? [teacherId, Number(subjectId), Number(classId)]
+        : [teacherId, Number(subjectId)];
+    const [fallbackRows] = await pool.query(fallbackQuery, fallbackParams);
+
+    return fallbackRows[0]?.academic_year || null;
+};
+
 // Get curriculum topics for a subject
 router.get('/topics', authenticateToken, async (req, res) => {
     try {
@@ -16,7 +90,7 @@ router.get('/topics', authenticateToken, async (req, res) => {
         const {
             subject_id,
             class_id,
-            academic_year = '2024-2025',
+            academic_year,
             status,
             search = '',
             limit = 50,
@@ -30,14 +104,15 @@ router.get('/topics', authenticateToken, async (req, res) => {
             });
         }
 
-        // Verify teacher has access to this subject
-        const [accessCheck] = await pool.query(`
-            SELECT id FROM teacher_subject_assignments 
-            WHERE teacher_id = ? AND subject_id = ? AND academic_year = ?
-            ${isValidParam(class_id) ? 'AND class_id = ?' : ''}
-        `, isValidParam(class_id) ? [teacherId, Number(subject_id), academic_year, Number(class_id)] : [teacherId, Number(subject_id), academic_year]);
+        const requestedAcademicYear = academic_year || await getCurrentAcademicYearName();
+        const effectiveAcademicYear = await resolveTeacherSubjectAcademicYear(
+            teacherId,
+            subject_id,
+            class_id,
+            requestedAcademicYear
+        );
 
-        if (accessCheck.length === 0 && req.user.role !== 'admin') {
+        if (!effectiveAcademicYear && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied. You are not assigned to this subject.'
@@ -67,7 +142,7 @@ router.get('/topics', authenticateToken, async (req, res) => {
             WHERE ct.teacher_id = ? AND ct.subject_id = ? AND ct.academic_year = ?
         `;
 
-        const params = [teacherId, teacherId, Number(subject_id), academic_year];
+        const params = [teacherId, teacherId, Number(subject_id), effectiveAcademicYear || requestedAcademicYear];
 
         if (isValidParam(class_id)) {
             query += ` AND (ct.class_id = ? OR ct.class_id IS NULL)`;
@@ -103,7 +178,7 @@ router.get('/topics', authenticateToken, async (req, res) => {
                 AND (tp.class_id = ct.class_id OR (tp.class_id IS NULL AND ct.class_id IS NULL))
             WHERE ct.teacher_id = ? AND ct.subject_id = ? AND ct.academic_year = ?
         `;
-        const countParams = [teacherId, teacherId, Number(subject_id), academic_year];
+        const countParams = [teacherId, teacherId, Number(subject_id), effectiveAcademicYear || requestedAcademicYear];
 
         if (isValidParam(class_id)) {
             countQuery += ` AND (ct.class_id = ? OR ct.class_id IS NULL)`;
@@ -159,7 +234,8 @@ router.get('/topics', authenticateToken, async (req, res) => {
                 limit: parseInt(limit),
                 offset: parseInt(offset),
                 hasMore: countResult[0].total > parseInt(offset) + parseInt(limit)
-            }
+            },
+            academic_year: effectiveAcademicYear || requestedAcademicYear
         });
 
     } catch (error) {
@@ -189,7 +265,7 @@ router.post('/topics/create', authenticateToken, async (req, res) => {
             assessment_methods,
             order_index = 0,
             is_mandatory = true,
-            academic_year = '2024-2025'
+            academic_year
         } = req.body;
 
         if (!subject_id || !topic_title) {
@@ -199,14 +275,15 @@ router.post('/topics/create', authenticateToken, async (req, res) => {
             });
         }
 
-        // Verify teacher has access to this subject
-        const [accessCheck] = await pool.execute(`
-            SELECT id FROM teacher_subject_assignments 
-            WHERE teacher_id = ? AND subject_id = ? AND academic_year = ?
-            ${isValidParam(class_id) ? 'AND class_id = ?' : ''}
-        `, isValidParam(class_id) ? [teacherId, subject_id, academic_year, class_id] : [teacherId, subject_id, academic_year]);
+        const requestedAcademicYear = academic_year || await getCurrentAcademicYearName();
+        const effectiveAcademicYear = await resolveTeacherSubjectAcademicYear(
+            teacherId,
+            subject_id,
+            class_id,
+            requestedAcademicYear
+        );
 
-        if (accessCheck.length === 0) {
+        if (!effectiveAcademicYear) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied. You are not assigned to this subject.'
@@ -233,12 +310,12 @@ router.post('/topics/create', authenticateToken, async (req, res) => {
             assessment_methods || null,
             parseInt(order_index),
             is_mandatory,
-            academic_year
+            effectiveAcademicYear
         ]);
 
         // Update subject statistics
         if (class_id) {
-            await updateSubjectStatistics(teacherId, subject_id, class_id, academic_year);
+            await updateSubjectStatistics(teacherId, subject_id, class_id, effectiveAcademicYear);
         }
 
         res.status(201).json({
@@ -249,7 +326,7 @@ router.post('/topics/create', authenticateToken, async (req, res) => {
                 topic_title,
                 subject_id,
                 class_id,
-                academic_year
+                academic_year: effectiveAcademicYear
             }
         });
 
