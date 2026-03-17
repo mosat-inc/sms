@@ -446,7 +446,7 @@ router.get('/assessments/pending-approval',
         const typeColumn = schemaMeta.fields.has('assessment_type') ? 'a.assessment_type' : 'a.exam_type';
         const pendingFilter = schemaMeta.fields.has('is_published')
             ? '(a.is_published = FALSE OR a.is_published IS NULL)'
-            : "LOWER(COALESCE(a.status, '')) NOT IN ('published', 'closed')";
+            : "LOWER(COALESCE(a.status, '')) = 'completed'";
         const marksJoin = schemaMeta.kind === 'legacy'
             ? 'LEFT JOIN assessment_marks am ON a.id = am.assessment_id'
             : 'LEFT JOIN student_grades sg ON a.id = sg.assessment_id';
@@ -471,6 +471,7 @@ router.get('/assessments/pending-approval',
             WHERE a.academic_year = ?
               AND ${pendingFilter}
             GROUP BY a.id
+            HAVING graded_count > 0
             ORDER BY a.updated_at DESC, a.created_at DESC
         `, [academic_year]);
 
