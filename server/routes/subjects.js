@@ -13,6 +13,45 @@ const {
 const path = require('path');
 const fs = require('fs');
 
+const getCurrentAcademicYearName = async () => {
+    try {
+        const [currentRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_current = TRUE AND is_active = TRUE
+             ORDER BY id DESC
+             LIMIT 1`
+        );
+
+        if (currentRows?.[0]?.year_name) {
+            return currentRows[0].year_name;
+        }
+
+        const [activeRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             WHERE is_active = TRUE
+             ORDER BY is_current DESC, id DESC
+             LIMIT 1`
+        );
+
+        if (activeRows?.[0]?.year_name) {
+            return activeRows[0].year_name;
+        }
+
+        const [anyRows] = await pool.execute(
+            `SELECT year_name
+             FROM academic_years
+             ORDER BY is_current DESC, is_active DESC, id DESC
+             LIMIT 1`
+        );
+
+        return anyRows?.[0]?.year_name || '2024-2025';
+    } catch (_error) {
+        return '2024-2025';
+    }
+};
+
 // Get classes for a specific subject that the teacher teaches
 router.get('/:subject_id/classes', 
     authenticateToken,
@@ -20,7 +59,7 @@ router.get('/:subject_id/classes',
     try {
         const teacherId = req.user.id;
         const subjectId = req.params.subject_id;
-        const academicYear = req.query.academic_year || '2024-2025';
+        const academicYear = req.query.academic_year || await getCurrentAcademicYearName();
         
         console.log(`🔍 Fetching classes for teacher ID: ${teacherId}, subject: ${subjectId}`);
         
@@ -77,7 +116,7 @@ router.get('/my-subjects',
     asyncHandler(async (req, res) => {
     try {
         const teacherId = req.user.id;
-        const academicYear = req.query.academic_year || '2024-2025';
+        const academicYear = req.query.academic_year || await getCurrentAcademicYearName();
         
         console.log(`🔍 Fetching subjects for teacher ID: ${teacherId}, academic year: ${academicYear}`);
         console.log('User info:', { id: req.user.id, username: req.user.username, role: req.user.role });
