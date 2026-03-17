@@ -21,6 +21,39 @@ const isValidParam = (param) => {
     return param !== null && param !== undefined && param !== 'undefined' && param !== '';
 };
 
+const normalizeMaterialTags = (rawTags) => {
+    if (!rawTags) {
+        return [];
+    }
+
+    if (Array.isArray(rawTags)) {
+        return rawTags.map(tag => String(tag).trim()).filter(Boolean);
+    }
+
+    if (typeof rawTags === 'object') {
+        return Object.values(rawTags).map(tag => String(tag).trim()).filter(Boolean);
+    }
+
+    if (typeof rawTags === 'string') {
+        try {
+            const parsed = JSON.parse(rawTags);
+            if (Array.isArray(parsed)) {
+                return parsed.map(tag => String(tag).trim()).filter(Boolean);
+            }
+            if (parsed && typeof parsed === 'object') {
+                return Object.values(parsed).map(tag => String(tag).trim()).filter(Boolean);
+            }
+        } catch (error) {
+            return rawTags
+                .split(',')
+                .map(tag => tag.trim())
+                .filter(Boolean);
+        }
+    }
+
+    return [];
+};
+
 // Get teacher's materials with filtering and pagination
 router.get('/my-materials', 
     authenticateToken,
@@ -127,9 +160,9 @@ router.get('/my-materials',
             subject: material.subject_name || 'No Subject',
             subjectCode: material.subject_code,
             isPublic: material.is_public,
-            downloadCount: material.total_downloads || 0,
+            downloadCount: material.download_count || material.total_downloads || 0,
             uploadDate: material.created_at,
-            tags: material.tags ? JSON.parse(material.tags) : []
+            tags: normalizeMaterialTags(material.tags)
         }));
 
         res.json({
