@@ -2,6 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import styled from 'styled-components';
 
+const isTransientNetworkError = (error) => {
+  return (
+    error?.code === 'ERR_NETWORK' ||
+    error?.code === 'ECONNABORTED' ||
+    error?.message === 'Network Error' ||
+    (!error?.response && !!error?.request)
+  );
+};
+
 const ToastContainer = styled.div`
   position: fixed;
   top: 80px;
@@ -96,6 +105,10 @@ const NotificationToast = () => {
   const [lastChecked, setLastChecked] = useState(new Date());
 
   const checkForNewAnnouncements = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return;
+    }
+
     try {
       const response = await api.get('/api/communication/announcements', {
         params: { 
@@ -117,7 +130,9 @@ const NotificationToast = () => {
         }
       }
     } catch (error) {
-      console.error('Error checking for new announcements:', error);
+      if (!isTransientNetworkError(error)) {
+        console.error('Error checking for new announcements:', error);
+      }
     }
   }, [api, lastChecked]);
 

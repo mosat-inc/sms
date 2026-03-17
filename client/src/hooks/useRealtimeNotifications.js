@@ -5,6 +5,17 @@ import { useAuth } from '../contexts/AuthContext';
 const cache = new Map();
 const CACHE_TTL = 30000; // 30 seconds cache
 const DEBUG_NOTIFICATIONS = process.env.REACT_APP_DEBUG_NOTIFICATIONS === 'true';
+const NETWORK_PAUSE_MIN_MS = 120000;
+const NETWORK_PAUSE_MAX_MS = 600000;
+
+const isTransientNetworkError = (error) => {
+  return (
+    error?.code === 'ERR_NETWORK' ||
+    error?.code === 'ECONNABORTED' ||
+    error?.message === 'Network Error' ||
+    (!error?.response && !!error?.request)
+  );
+};
 
 const useRealtimeNotifications = () => {
   const { api } = useAuth();
@@ -15,6 +26,7 @@ const useRealtimeNotifications = () => {
   const [lastFetch, setLastFetch] = useState(null);
   const [rateLimitedUntil, setRateLimitedUntil] = useState(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [networkPauseUntil, setNetworkPauseUntil] = useState(null);
   
   const pollIntervalRef = useRef(null);
   const debounceTimeoutRef = useRef(null);
@@ -51,7 +63,9 @@ const useRealtimeNotifications = () => {
     let newInterval;
     
     // If we're rate limited, use much longer interval
-    if (rateLimitedUntil && Date.now() < rateLimitedUntil) {
+    if (networkPauseUntil && Date.now() < networkPauseUntil) {
+      newInterval = Math.max(NETWORK_PAUSE_MIN_MS, 30000 * Math.pow(2, consecutiveErrors));
+    } else if (rateLimitedUntil && Date.now() < rateLimitedUntil) {
       newInterval = Math.max(300000, 60000 * Math.pow(2, consecutiveErrors)); // 5 minutes minimum, exponential backoff
     } else if (consecutiveErrors > 0) {
       // Exponential backoff for errors: 1min, 2min, 4min, 8min (max)
@@ -75,7 +89,7 @@ const useRealtimeNotifications = () => {
       }
       setPollInterval(newInterval);
     }
-  }, [lastFetch, rateLimitedUntil, pollInterval, consecutiveErrors]);
+  }, [lastFetch, networkPauseUntil, rateLimitedUntil, pollInterval, consecutiveErrors]);
 
   // Debounced fetch to prevent rapid consecutive calls
   const debouncedFetchNotifications = useCallback((force = false, delay = 1000) => {
@@ -104,6 +118,17 @@ const useRealtimeNotifications = () => {
     // Check if we're still rate limited
     if (rateLimitedUntil && Date.now() < rateLimitedUntil && !force) {
       if (DEBUG_NOTIFICATIONS) console.log('Still rate limited, skipping fetch');
+      return;
+    }
+
+    if (networkPauseUntil && Date.now() < networkPauseUntil && !force) {
+      if (DEBUG_NOTIFICATIONS) console.log('Notification polling is paused due to network failure');
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setError({ type: 'network', message: 'Offline. Notifications paused until connection returns.' });
+      setNetworkPauseUntil(Date.now() + NETWORK_PAUSE_MIN_MS);
       return;
     }
     
@@ -205,11 +230,14 @@ const useRealtimeNotifications = () => {
       setLastFetch(Date.now());
       setConsecutiveErrors(0); // Reset error count on success
       setRateLimitedUntil(null); // Clear rate limit status on success
+      setNetworkPauseUntil(null);
       
       // Update polling interval based on activity
       updatePollInterval();
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      if (DEBUG_NOTIFICATIONS) {
+        console.error('Error fetching notifications:', error);
+      }
       setConsecutiveErrors(prev => prev + 1);
       
       // Handle rate limiting errors gracefully
@@ -219,8 +247,13 @@ const useRealtimeNotifications = () => {
         const rateLimitDuration = Math.min(300000, 120000 * Math.pow(1.5, consecutiveErrors)); // 2min to 5min max
         setRateLimitedUntil(Date.now() + rateLimitDuration);
         setError({ type: 'rate_limit', message: 'Too many requests. Slowing down...' });
-      } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
-        setError({ type: 'network', message: 'Network error. Will retry...' });
+      } else if (isTransientNetworkError(error)) {
+        const pauseDuration = Math.min(
+          NETWORK_PAUSE_MAX_MS,
+          NETWORK_PAUSE_MIN_MS * Math.pow(1.5, Math.max(0, consecutiveErrors))
+        );
+        setNetworkPauseUntil(Date.now() + pauseDuration);
+        setError({ type: 'network', message: 'Connection issue. Notification polling paused temporarily.' });
       } else {
         setError({ type: 'general', message: 'Failed to fetch notifications' });
         console.error('Notification fetch failed:', error.message);
@@ -244,7 +277,7 @@ const useRealtimeNotifications = () => {
         await new Promise(resolve => setTimeout(resolve, Math.min(5000, 1000 * consecutiveErrors)));
       }
     }
-  }, [api, loading, lastFetch, rateLimitedUntil, getCacheKey, getCachedData, setCachedData, updatePollInterval, consecutiveErrors]);
+  }, [api, loading, lastFetch, rateLimitedUntil, networkPauseUntil, getCacheKey, getCachedData, setCachedData, updatePollInterval, consecutiveErrors]);
 
   // Public fetch function with debouncing
   const fetchNotifications = useCallback((force = false) => {
@@ -361,6 +394,29 @@ const useRealtimeNotifications = () => {
       debounceTimeoutRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setNetworkPauseUntil(null);
+      setConsecutiveErrors(0);
+      setError(null);
+      fetchNotifications(true);
+    };
+
+    const handleOffline = () => {
+      setNetworkPauseUntil(Date.now() + NETWORK_PAUSE_MIN_MS);
+      setError({ type: 'network', message: 'Offline. Notification polling paused.' });
+      resetLoadingState();
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [fetchNotifications, resetLoadingState]);
   
   // Auto-reset if loading state persists too long
   useEffect(() => {
