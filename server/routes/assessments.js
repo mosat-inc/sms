@@ -390,6 +390,7 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
         }
 
         const connection = await pool.getConnection();
+        const schemaMeta = await getAssessmentsSchemaMeta(connection);
 
         // Verify teacher has access to this class and subject
         const [teacherAccess] = await connection.execute(`
