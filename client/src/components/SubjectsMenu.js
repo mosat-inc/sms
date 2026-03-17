@@ -1009,10 +1009,14 @@ const SubjectsMenu = () => {
           id: material.id,
           name: material.fileName,
           type: material.fileType.toUpperCase(),
+          mimeType: material.mimeType,
           size: formatFileSize(material.fileSize),
           subject: material.subject,
           uploadDate: new Date(material.uploadDate).toISOString().split('T')[0],
-          category: material.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
+          category: material.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          tags: material.tags || [],
+          fileName: material.fileName,
+          fileAvailable: material.fileAvailable !== false
         }));
         
         // Deduplicate at the source to prevent React key conflicts
@@ -1143,6 +1147,10 @@ const SubjectsMenu = () => {
 
   // Function to handle material viewing
   const handleViewMaterial = useCallback((material) => {
+    if (material.fileAvailable === false) {
+      toast.error('This file is no longer available on the server. Re-upload it to restore preview and download.');
+      return;
+    }
     setSelectedMaterial(material);
     setShowFileViewer(true);
   }, []);
@@ -1156,6 +1164,11 @@ const SubjectsMenu = () => {
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
+    if (material.fileAvailable === false) {
+      toast.error('This file is no longer available on the server. Re-upload it to restore downloads.');
+      return;
+    }
+
     try {
       const response = await api.get(`/api/materials/${material.id}/download`, {
         responseType: 'blob',
@@ -1975,10 +1988,19 @@ const SubjectsMenu = () => {
                     </div>
                   )}
 
+                  {material.fileAvailable === false && (
+                    <div className="material-tags">
+                      <span className="tag" style={{ background: '#fee2e2', color: '#991b1b' }}>
+                        File Missing - Re-upload Required
+                      </span>
+                    </div>
+                  )}
+
                   <div className="material-actions">
                     <button 
                       className="view" 
                       onClick={() => handleViewMaterial(material)}
+                      disabled={material.fileAvailable === false}
                       title="Preview file"
                     >
                       <FaEye /> View
@@ -1986,6 +2008,7 @@ const SubjectsMenu = () => {
                     <button 
                       className="download" 
                       onClick={() => handleDownloadMaterial(material)}
+                      disabled={material.fileAvailable === false}
                       title="Download file"
                     >
                       <FaDownload /> Download
