@@ -417,6 +417,10 @@ const ClassDashboard = () => {
       navigate(`/classes/${classId}/timetable`);
       return;
     }
+    if (action === 'exams') {
+      navigate(`/grades?class_id=${classId}`);
+      return;
+    }
     navigate(`/classes/${classId}/${action}`);
   };
 

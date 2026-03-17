@@ -9,6 +9,7 @@ import Footer from './components/Footer';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
+import GradesMenu from './components/GradesMenu';
 import LoadingScreen from './components/LoadingScreen';
 import SessionWarning from './components/SessionWarning';
 import StudentAdmission from './components/StudentAdmission';
@@ -223,6 +224,15 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Timetable />
+                </ProtectedRoute>
+              } 
+            />
+
+            <Route 
+              path="/grades" 
+              element={
+                <ProtectedRoute>
+                  <GradesMenu />
                 </ProtectedRoute>
               } 
             />

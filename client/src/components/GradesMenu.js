@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
     FaGraduationCap, FaPlus, FaEdit, FaEye, FaChartBar, FaDownload, 
     FaCalendarAlt, FaFilter, FaSearch, FaUsers, FaTasks, FaCheckCircle,
@@ -604,6 +605,8 @@ const MarksEntrySection = styled(Section)`
 
 const GradesMenu = () => {
   const { api } = useAuth();
+  const [searchParams] = useSearchParams();
+  const requestedClassId = searchParams.get('class_id') || '';
   const [activeTab, setActiveTab] = useState('assessments');
   const [assessments, setAssessments] = useState([]);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
@@ -633,7 +636,7 @@ const GradesMenu = () => {
   const [analyticsError, setAnalyticsError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [analyticsFilters, setAnalyticsFilters] = useState({
-    class_id: '',
+    class_id: requestedClassId,
     subject_id: '',
     exam_type: '',
     assessment_type: '',
@@ -677,6 +680,19 @@ const GradesMenu = () => {
   useEffect(() => {
     fetchClasses();
   }, []);
+
+  useEffect(() => {
+    if (!requestedClassId) return;
+    setAnalyticsFilters((prev) => {
+      if (String(prev.class_id || '') === String(requestedClassId)) return prev;
+      return {
+        ...prev,
+        class_id: String(requestedClassId),
+        subject_id: '',
+      };
+    });
+    setActiveTab('assessments');
+  }, [requestedClassId]);
   
   // Fetch subjects when class is selected
   useEffect(() => {
