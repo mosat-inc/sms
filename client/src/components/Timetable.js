@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import styled from 'styled-components';
 import { toast } from 'react-toastify';
 import { jsPDF } from 'jspdf';
@@ -262,6 +263,7 @@ function normalizeTemplateDays(days) {
 }
 
 const Timetable = () => {
+  const { classId: routeClassId } = useParams();
   const { api, user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const isTeacher = user?.role === 'teacher';
@@ -270,7 +272,7 @@ const Timetable = () => {
   const [loading, setLoading] = useState(false);
   const [classes, setClasses] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
-  const [selectedClass, setSelectedClass] = useState('');
+  const [selectedClass, setSelectedClass] = useState(routeClassId ? String(routeClassId) : '');
   const [selectedYear, setSelectedYear] = useState('');
   const [data, setData] = useState(null);
 
@@ -485,10 +487,14 @@ const Timetable = () => {
   }, [fetchAcademicYears, fetchClasses]);
 
   useEffect(() => {
+    if (routeClassId) {
+      setSelectedClass(String(routeClassId));
+      return;
+    }
     if (classes.length > 0 && !selectedClass) {
       setSelectedClass(String(classes[0].id));
     }
-  }, [classes, selectedClass]);
+  }, [classes, routeClassId, selectedClass]);
 
   useEffect(() => {
     fetchTimetable();

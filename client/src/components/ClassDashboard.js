@@ -413,6 +413,10 @@ const ClassDashboard = () => {
   };
 
   const handleActionClick = (action) => {
+    if (action === 'timetable') {
+      navigate(`/classes/${classId}/timetable`);
+      return;
+    }
     navigate(`/classes/${classId}/${action}`);
   };
 

@@ -20,6 +20,7 @@ import FirstPasswordChange from './components/FirstPasswordChange';
 import AdminUserManagement from './components/AdminUserManagement';
 import ClassDashboard from './components/ClassDashboard';
 import MyClasses from './components/MyClasses';
+import Timetable from './components/Timetable';
 import AttendanceTracker from './components/AttendanceTracker';
 import AttendanceDetailView from './components/AttendanceDetailView';
 import AttendanceMenu from './components/AttendanceMenu';
@@ -213,6 +214,15 @@ function App() {
               element={
                 <ProtectedRoute>
                   <StudentRoster />
+                </ProtectedRoute>
+              } 
+            />
+
+            <Route 
+              path="/classes/:classId/timetable" 
+              element={
+                <ProtectedRoute>
+                  <Timetable />
                 </ProtectedRoute>
               } 
             />
