@@ -39,6 +39,9 @@ import { mediaQuery } from '../hooks/useDevice';
 
 const GradesMenuContainer = styled(PageContainer)`
   padding: 20px;
+  --grades-surface: linear-gradient(145deg, #f7f9ff 0%, #e8eefc 100%);
+  --grades-shadow-raised: -10px -10px 22px rgba(255, 255, 255, 0.95), 10px 10px 24px rgba(148, 163, 184, 0.26);
+  --grades-shadow-inset: inset -4px -4px 10px rgba(255, 255, 255, 0.88), inset 4px 4px 10px rgba(148, 163, 184, 0.16);
   
   ${mediaQuery('tablet')} {
     padding: 15px;
@@ -50,6 +53,11 @@ const GradesMenuContainer = styled(PageContainer)`
 `;
 
 const Header = styled(PageHeader)`
+  background: var(--grades-surface);
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: var(--grades-shadow-raised);
+
   h1 {
     display: flex;
     align-items: center;
@@ -127,6 +135,11 @@ const TabsContainer = styled(TabContainer)`
 `;
 
 const ContentSection = styled(Section)`
+  background: var(--grades-surface);
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: var(--grades-shadow-raised);
+
   h3 {
     font-size: 1.25rem;
     font-weight: 600;
@@ -141,12 +154,24 @@ const ContentSection = styled(Section)`
 `;
 
 const FilterSection = styled(SharedFiltersSection)`
+  background: var(--grades-surface);
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: var(--grades-shadow-raised);
+
   .action-buttons {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     margin-left: auto;
   }
+`;
+
+const NeumoStatCard = styled(StatCard)`
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--grades-surface);
+  box-shadow: var(--grades-shadow-raised);
 `;
 
 const AssessmentsGrid = styled.div`
@@ -157,16 +182,16 @@ const AssessmentsGrid = styled.div`
 `;
 
 const AssessmentCard = styled.div`
-  background: ${colors.cardBackground};
-  border-radius: 12px;
+  background: var(--grades-surface);
+  border-radius: 0;
   padding: 20px;
-  border: 1px solid ${colors.border};
+  border: 1px solid rgba(148, 163, 184, 0.18);
   transition: all 0.3s ease;
-  box-shadow: ${shadows.card};
+  box-shadow: var(--grades-shadow-raised);
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: ${shadows.cardHover};
+    box-shadow: -12px -12px 28px rgba(255, 255, 255, 0.98), 12px 12px 28px rgba(148, 163, 184, 0.28);
     border-color: rgba(37, 99, 235, 0.35);
   }
 
@@ -189,7 +214,7 @@ const AssessmentCard = styled.div`
       color: ${colors.primaryPurple};
       border: 1px solid rgba(99, 102, 241, 0.18);
       padding: 4px 8px;
-      border-radius: 6px;
+      border-radius: 0;
       font-size: 0.8rem;
       text-transform: capitalize;
     }
@@ -223,7 +248,7 @@ const AssessmentCard = styled.div`
     .progress-bar {
       height: 6px;
       background: rgba(15, 23, 42, 0.08);
-      border-radius: 3px;
+      border-radius: 0;
       overflow: hidden;
 
       .progress-fill {
@@ -242,7 +267,7 @@ const AssessmentCard = styled.div`
     button {
       padding: 8px 12px;
       border: none;
-      border-radius: 6px;
+      border-radius: 0;
       cursor: pointer;
       transition: all 0.3s ease;
       display: flex;
@@ -286,9 +311,13 @@ const AssessmentCard = styled.div`
 const GradingTable = styled(Section)`
   padding: 0;
   overflow: hidden;
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--grades-surface);
+  box-shadow: var(--grades-shadow-raised);
 
   .table-header {
-    background: ${colors.gradientLight};
+    background: var(--grades-surface);
     padding: 16px 20px;
     border-bottom: 1px solid ${colors.borderLight};
     display: flex;
@@ -310,7 +339,7 @@ const GradingTable = styled(Section)`
       color: #047857;
       border: 1px solid rgba(34, 197, 94, 0.25);
       padding: 8px 16px;
-      border-radius: 6px;
+      border-radius: 0;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -369,16 +398,17 @@ const GradingTable = styled(Section)`
       width: 80px;
       padding: 10px 12px;
       border: 1px solid ${colors.border};
-      background: ${colors.cardBackground};
+      background: var(--grades-surface);
       color: ${colors.textPrimary};
-      border-radius: 0.75rem;
+      border-radius: 0;
       text-align: center;
       font-weight: 500;
+      box-shadow: var(--grades-shadow-inset);
 
       &:focus {
         outline: none;
         border-color: ${colors.primaryBlue};
-        box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+        box-shadow: var(--grades-shadow-inset), 0 0 0 1px rgba(59, 130, 246, 0.4);
       }
     }
 
@@ -386,14 +416,15 @@ const GradingTable = styled(Section)`
       width: 200px;
       padding: 10px 12px;
       border: 1px solid ${colors.border};
-      background: ${colors.cardBackground};
+      background: var(--grades-surface);
       color: ${colors.textPrimary};
-      border-radius: 0.75rem;
+      border-radius: 0;
+      box-shadow: var(--grades-shadow-inset);
 
       &:focus {
         outline: none;
         border-color: ${colors.primaryBlue};
-        box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+        box-shadow: var(--grades-shadow-inset), 0 0 0 1px rgba(59, 130, 246, 0.4);
       }
     }
 
@@ -412,7 +443,7 @@ const GradingTable = styled(Section)`
         color: ${colors.accentBlueDark};
         border: 1px solid rgba(99, 102, 241, 0.18);
         padding: 2px 6px;
-        border-radius: 4px;
+        border-radius: 0;
         font-size: 0.8rem;
         font-weight: 600;
       }
@@ -471,6 +502,10 @@ const LoadingSpinner = styled.div`
 const MarksEntrySection = styled(Section)`
   padding: 0;
   overflow: hidden;
+  border-radius: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--grades-surface);
+  box-shadow: var(--grades-shadow-raised);
 
   .table-header {
     padding: 16px 20px;
@@ -479,7 +514,7 @@ const MarksEntrySection = styled(Section)`
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: ${colors.gradientLight};
+    background: var(--grades-surface);
 
     h4 {
       margin: 0;
@@ -552,17 +587,18 @@ const MarksEntrySection = styled(Section)`
     width: 92px;
     padding: 10px 12px;
     border: 1px solid ${colors.border};
-    background: ${colors.cardBackground};
+    background: var(--grades-surface);
     color: ${colors.textPrimary};
-    border-radius: 0.75rem;
+    border-radius: 0;
     font-size: 14px;
     text-align: center;
     font-weight: 600;
+    box-shadow: var(--grades-shadow-inset);
 
     &:focus {
       outline: none;
       border-color: ${colors.primaryBlue};
-      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+      box-shadow: var(--grades-shadow-inset), 0 0 0 1px rgba(59, 130, 246, 0.4);
     }
 
     &:disabled {
@@ -576,15 +612,16 @@ const MarksEntrySection = styled(Section)`
     width: 220px;
     padding: 10px 12px;
     border: 1px solid ${colors.border};
-    background: ${colors.cardBackground};
+    background: var(--grades-surface);
     color: ${colors.textPrimary};
-    border-radius: 0.75rem;
+    border-radius: 0;
     font-size: 14px;
+    box-shadow: var(--grades-shadow-inset);
 
     &:focus {
       outline: none;
       border-color: ${colors.primaryBlue};
-      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+      box-shadow: var(--grades-shadow-inset), 0 0 0 1px rgba(59, 130, 246, 0.4);
     }
   }
 
@@ -594,7 +631,7 @@ const MarksEntrySection = styled(Section)`
     justify-content: center;
     min-width: 34px;
     height: 28px;
-    border-radius: 999px;
+    border-radius: 0;
     padding: 0 10px;
     background: rgba(99, 102, 241, 0.12);
     border: 1px solid rgba(99, 102, 241, 0.18);
@@ -2683,34 +2720,34 @@ const GradesMenu = ({ mode = 'grades' }) => {
                 <FaTasks /> Summary Overview
               </SectionTitle>
               <StatsGrid>
-                <StatCard>
+                <NeumoStatCard>
                   <div className="stat-icon">📝</div>
                   <div className="stat-meta">
                     <div className="stat-number">{teacherAnalyticsData.summary?.total_assessments || 0}</div>
                     <div className="stat-label">Total Assessments</div>
                   </div>
-                </StatCard>
-                <StatCard>
+                </NeumoStatCard>
+                <NeumoStatCard>
                   <div className="stat-icon">👨‍🎓</div>
                   <div className="stat-meta">
                     <div className="stat-number">{teacherAnalyticsData.summary?.total_students || 0}</div>
                     <div className="stat-label">Total Students</div>
                   </div>
-                </StatCard>
-                <StatCard>
+                </NeumoStatCard>
+                <NeumoStatCard>
                   <div className="stat-icon">📈</div>
                   <div className="stat-meta">
                     <div className="stat-number">{teacherAnalyticsData.summary?.overall_average || 0}%</div>
                     <div className="stat-label">Overall Average</div>
                   </div>
-                </StatCard>
-                <StatCard>
+                </NeumoStatCard>
+                <NeumoStatCard>
                   <div className="stat-icon">✅</div>
                   <div className="stat-meta">
                     <div className="stat-number">{teacherAnalyticsData.summary?.graded_assessments || 0}</div>
                     <div className="stat-label">Graded Assessments</div>
                   </div>
-                </StatCard>
+                </NeumoStatCard>
               </StatsGrid>
             </Section>
 
@@ -2736,7 +2773,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
                       grade === 'A' ? '#16a34a' : grade === 'F' ? '#dc2626' : grade === 'D' ? '#d97706' : '#2563eb';
 
                     return (
-                      <StatCard key={grade}>
+                      <NeumoStatCard key={grade}>
                         <div className="stat-icon">{grade}</div>
                         <div className="stat-meta">
                           <div className="stat-number" style={{ color: gradeColor }}>
@@ -2745,7 +2782,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
                           <div className="stat-label">Grade {grade}</div>
                           <div style={{ fontSize: '0.82rem', color: colors.textSecondary }}>{percentage}%</div>
                         </div>
-                      </StatCard>
+                      </NeumoStatCard>
                     );
                   })}
                 </StatsGrid>
@@ -3319,41 +3356,41 @@ const GradesMenu = ({ mode = 'grades' }) => {
         <Section>
           <SectionTitle>Summary Statistics</SectionTitle>
           <StatsGrid>
-            <StatCard>
+            <NeumoStatCard>
               <div className="stat-icon">👥</div>
               <div className="stat-meta">
                 <div className="stat-number">{summary.total_students}</div>
                 <div className="stat-label">Total Students</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">✅</div>
               <div className="stat-meta">
                 <div className="stat-number">{summary.graded_students}</div>
                 <div className="stat-label">Graded</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">📈</div>
               <div className="stat-meta">
                 <div className="stat-number">{summary.average_percentage}%</div>
                 <div className="stat-label">Class Average</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">🟢</div>
               <div className="stat-meta">
                 <div className="stat-number">{summary.pass_count}</div>
                 <div className="stat-label">Passed</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">🔴</div>
               <div className="stat-meta">
                 <div className="stat-number">{summary.fail_count}</div>
                 <div className="stat-label">Failed</div>
               </div>
-            </StatCard>
+            </NeumoStatCard>
           </StatsGrid>
         </Section>
         
@@ -3474,48 +3511,48 @@ const GradesMenu = ({ mode = 'grades' }) => {
         <Section>
           <SectionTitle>Performance Overview</SectionTitle>
           <StatsGrid>
-            <StatCard>
+            <NeumoStatCard>
               <div className="stat-icon">📊</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.average_score}%</div>
                 <div className="stat-label">Average Score</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">📍</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.median_score}%</div>
                 <div className="stat-label">Median Score</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">🏆</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.highest_score}%</div>
                 <div className="stat-label">Highest Score</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">🧯</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.lowest_score}%</div>
                 <div className="stat-label">Lowest Score</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">✅</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.pass_rate}%</div>
                 <div className="stat-label">Pass Rate</div>
               </div>
-            </StatCard>
-            <StatCard>
+            </NeumoStatCard>
+            <NeumoStatCard>
               <div className="stat-icon">🧑‍🤝‍🧑</div>
               <div className="stat-meta">
                 <div className="stat-number">{analytics.attendance_rate}%</div>
                 <div className="stat-label">Attendance</div>
               </div>
-            </StatCard>
+            </NeumoStatCard>
           </StatsGrid>
         </Section>
 
@@ -3526,7 +3563,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
               const gradeColor =
                 grade === 'A' ? '#16a34a' : grade === 'F' ? '#dc2626' : grade === 'D' ? '#d97706' : '#2563eb';
               return (
-                <StatCard key={grade}>
+                <NeumoStatCard key={grade}>
                   <div className="stat-icon">{grade}</div>
                   <div className="stat-meta">
                     <div className="stat-number" style={{ color: gradeColor }}>
@@ -3534,7 +3571,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
                     </div>
                     <div className="stat-label">Grade {grade}</div>
                   </div>
-                </StatCard>
+                </NeumoStatCard>
               );
             })}
           </StatsGrid>
