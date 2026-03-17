@@ -11,8 +11,8 @@ const createAssessmentSchema = Joi.object({
     assessment_name: Joi.string().min(3).max(255).required(),
     exam_type: Joi.string().valid('mid-term exams', 'terminal exams', 'annual exams', 'mock exams').required(),
     assessment_date: Joi.date().iso().required(),
-    max_marks: Joi.number().integer().min(1).max(1000).default(100),
-    pass_marks: Joi.number().integer().min(1).max(1000).default(40),
+    max_marks: Joi.number().integer().min(1).max(100).default(100),
+    pass_marks: Joi.number().integer().min(1).max(100).default(40),
     description: Joi.string().max(1000).allow(null, '').optional(),
     duration_minutes: Joi.number().integer().min(30).max(480).default(120)
 });
@@ -21,7 +21,7 @@ const updateMarksSchema = Joi.object({
     student_marks: Joi.array().items(
         Joi.object({
             student_id: Joi.number().integer().positive().required(),
-            marks_obtained: Joi.number().min(0).max(1000).allow(null),
+            marks_obtained: Joi.number().min(0).max(100).allow(null),
             is_present: Joi.boolean().default(true),
             is_absent: Joi.boolean().optional(),
             is_excused: Joi.boolean().optional(),
@@ -350,6 +350,13 @@ router.post('/', Auth.authenticateToken, async (req, res) => {
             duration_minutes
         } = value;
 
+        if (pass_marks > max_marks) {
+            return res.status(400).json({
+                success: false,
+                message: 'Pass marks cannot be greater than total marks'
+            });
+        }
+
         const connection = await pool.getConnection();
 
         // Verify teacher has access to this class and subject
@@ -564,6 +571,14 @@ router.put('/:id/marks', Auth.authenticateToken, async (req, res) => {
         // Update marks for each student
         const updatePromises = student_marks.map(async (mark) => {
             const { student_id, marks_obtained, is_present, remarks, grade: frontendGrade } = mark;
+
+            if (marks_obtained !== null && marks_obtained !== undefined && Number(marks_obtained) > 100) {
+                throw new Error('Marks obtained cannot be greater than 100');
+            }
+
+            if (marks_obtained !== null && marks_obtained !== undefined && Number(marks_obtained) < 0) {
+                throw new Error('Marks obtained cannot be less than 0');
+            }
             
             // Use grade from frontend if provided, otherwise calculate it
             const grade = frontendGrade || calculateGrade(marks_obtained, max_marks);

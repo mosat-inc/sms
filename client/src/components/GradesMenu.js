@@ -694,6 +694,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const isAdmin = user?.role === 'admin';
+  const MAX_ALLOWED_MARKS = 100;
 
   // Helper function to calculate letter grade based on percentage
   const calculateLetterGrade = (percentage) => {
@@ -930,6 +931,15 @@ const GradesMenu = ({ mode = 'grades' }) => {
   };
 
   const handleGradeChange = (studentId, field, value) => {
+    if (field === 'marks_obtained' && value !== '') {
+      const numericValue = Number(value);
+      if (Number.isNaN(numericValue)) return;
+      if (numericValue < 0 || numericValue > MAX_ALLOWED_MARKS) {
+        toast.error('Marks must be between 0 and 100');
+        return;
+      }
+    }
+
     setGrades(prev => ({
       ...prev,
       [studentId]: {
@@ -937,7 +947,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
         [field]: value,
         // Calculate percentage when marks change
         ...(field === 'marks_obtained' && selectedAssessment ? {
-          percentage: value ? ((parseFloat(value) / parseFloat(selectedAssessment.total_marks)) * 100).toFixed(2) : null
+          percentage: value ? ((parseFloat(value) / Math.min(parseFloat(selectedAssessment.total_marks || selectedAssessment.max_marks || MAX_ALLOWED_MARKS), MAX_ALLOWED_MARKS)) * 100).toFixed(2) : null
         } : {})
       }
     }));
@@ -1360,6 +1370,15 @@ const GradesMenu = ({ mode = 'grades' }) => {
   };
   
   const handleNewMarkChange = (studentId, field, value) => {
+    if (field === 'marks_obtained' && value !== '') {
+      const numericValue = Number(value);
+      if (Number.isNaN(numericValue)) return;
+      if (numericValue < 0 || numericValue > MAX_ALLOWED_MARKS) {
+        toast.error('Marks must be between 0 and 100');
+        return;
+      }
+    }
+
     setNewStudentMarks(prev => {
       const updatedMarks = {
         ...prev,
@@ -1371,7 +1390,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
       
       // If marks_obtained changed, automatically calculate and set remarks
       if (field === 'marks_obtained' && value) {
-        const percentage = ((parseFloat(value) / newAssessmentData.total_marks) * 100);
+        const percentage = ((parseFloat(value) / Math.min(newAssessmentData.total_marks, MAX_ALLOWED_MARKS)) * 100);
         const letterGrade = calculateLetterGrade(percentage);
         const automaticRemark = getAutomaticRemark(letterGrade);
         
@@ -1391,6 +1410,11 @@ const GradesMenu = ({ mode = 'grades' }) => {
   const saveNewAssessment = async () => {
     if (!newAssessmentData.title.trim()) {
       toast.error('Please enter assessment title');
+      return;
+    }
+
+    if (newAssessmentData.total_marks < 1 || newAssessmentData.total_marks > MAX_ALLOWED_MARKS) {
+      toast.error('Total marks must be between 1 and 100');
       return;
     }
     
@@ -2330,7 +2354,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
                     type="number"
                     className="grade-input"
                     min="0"
-                    max={selectedAssessment.total_marks}
+                    max={Math.min(Number(selectedAssessment.total_marks || selectedAssessment.max_marks || MAX_ALLOWED_MARKS), MAX_ALLOWED_MARKS)}
                     step="0.5"
                     value={grades[student.student_id]?.marks_obtained || ''}
                     onChange={(e) => handleGradeChange(student.student_id, 'marks_obtained', e.target.value)}
@@ -2442,11 +2466,11 @@ const GradesMenu = ({ mode = 'grades' }) => {
               onChange={(e) =>
                 setNewAssessmentData((prev) => ({
                   ...prev,
-                  total_marks: parseInt(e.target.value, 10) || 100,
+                  total_marks: Math.min(MAX_ALLOWED_MARKS, Math.max(1, parseInt(e.target.value, 10) || 100)),
                 }))
               }
               min="1"
-              max="1000"
+              max="100"
             />
           </div>
         </div>
@@ -2534,7 +2558,7 @@ const GradesMenu = ({ mode = 'grades' }) => {
                       type="number"
                       className="grade-input"
                       min="0"
-                      max={newAssessmentData.total_marks}
+                      max={Math.min(newAssessmentData.total_marks, MAX_ALLOWED_MARKS)}
                       step="0.5"
                       value={marks.marks_obtained || ''}
                       onChange={(e) => handleNewMarkChange(student.id, 'marks_obtained', e.target.value)}

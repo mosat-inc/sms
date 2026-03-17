@@ -240,6 +240,10 @@ router.post('/grades/record',
             }
             
             const assessment = assessments[0];
+
+            if (Number(assessment.total_marks) > 100) {
+                throw new AuthorizationError('This assessment has an invalid total marks value greater than 100');
+            }
             
             // Process each grade
             const connection = await pool.getConnection();
@@ -255,6 +259,14 @@ router.post('/grades/record',
                     let percentage = null;
                     let letterGrade = null;
                     let gradePoints = null;
+
+                    if (marks_obtained !== null && marks_obtained !== undefined && Number(marks_obtained) > 100) {
+                        throw new AuthorizationError('Marks obtained cannot be greater than 100');
+                    }
+
+                    if (marks_obtained !== null && marks_obtained !== undefined && Number(marks_obtained) < 0) {
+                        throw new AuthorizationError('Marks obtained cannot be less than 0');
+                    }
                     
                     if (!is_absent && !is_excused && marks_obtained !== null) {
                         percentage = (marks_obtained / assessment.total_marks) * 100;
