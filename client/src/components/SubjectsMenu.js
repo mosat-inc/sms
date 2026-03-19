@@ -23,6 +23,13 @@ import {
 } from './shared/StyledComponents';
 import { mediaQuery } from '../hooks/useDevice';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  initiateMaterialUpload,
+  uploadFileToSignedUrl,
+  completeMaterialUpload,
+  fetchMaterialAccessInfo,
+  downloadMaterialUrl
+} from '../services/materialsService';
 
 const SubjectsMenuContainer = styled(PageContainer)`
   padding: 20px;
@@ -993,66 +1000,20 @@ const SubjectsMenu = () => {
 
   const normalizeMaterialForUi = useCallback((material) => ({
     id: material.id,
-    name: material.fileName,
-    type: material.fileType.toUpperCase(),
+    name: material.fileName || material.originalName,
+    type: (material.fileType || '').toUpperCase(),
     mimeType: material.mimeType,
-    size: formatFileSize(material.fileSize),
+    size: formatFileSize(material.fileSize || material.sizeBytes || 0),
     subject: material.subject,
     subjectId: material.subjectId || material.subject_id || null,
-    uploadDate: new Date(material.uploadDate).toISOString().split('T')[0],
+    uploadDate: new Date(material.uploadDate || material.createdAt || Date.now()).toISOString().split('T')[0],
     category: material.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
     tags: material.tags || [],
-    fileName: material.fileName,
-    fileAvailable: material.fileAvailable !== false
+    fileName: material.fileName || material.originalName,
+    fileAvailable: material.fileAvailable !== false,
+    viewUrl: material.viewUrl || null,
+    downloadUrl: material.downloadUrl || null
   }), [formatFileSize]);
-
-  const fetchMaterialBlob = useCallback(async (materialId, action, signal) => {
-    const token = localStorage.getItem('sms_token');
-    if (!token) {
-      throw new Error('Authentication token missing. Please log in again.');
-    }
-
-    const requestUrl = `/api/materials/${materialId}/${action}`;
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        const response = await fetch(requestUrl, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`
-          },
-          cache: 'no-store',
-          signal
-        });
-
-        if (!response.ok) {
-          let errorMessage = `${action} failed`;
-          try {
-            const errorPayload = await response.json();
-            errorMessage = errorPayload?.message || errorMessage;
-          } catch (parseError) {
-            // Ignore non-JSON error payloads
-          }
-          throw new Error(errorMessage);
-        }
-
-        return await response.blob();
-      } catch (error) {
-        lastError = error;
-        if (signal?.aborted) {
-          throw error;
-        }
-
-        if (attempt === 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          continue;
-        }
-      }
-    }
-
-    throw lastError || new Error(`${action} failed`);
-  }, []);
 
   const fetchMaterials = useCallback(async (forceRefresh = false) => {
     console.log('🔄 fetchMaterials called, forceRefresh:', forceRefresh);
@@ -1154,6 +1115,7 @@ const SubjectsMenu = () => {
       toast.error('This file is no longer available on the server. Re-upload it to restore preview and download.');
       return;
     }
+    setMediaBlob(null);
     setSelectedMaterial(material);
     setShowFileViewer(true);
   }, []);
@@ -1181,17 +1143,12 @@ const SubjectsMenu = () => {
     toast.error(message || 'This material record is stale. Re-upload the file to restore access.');
   }, [fetchMaterials, handleCloseFileViewer, selectedMaterial]);
 
-  // File viewer media fetching effect
+  // File viewer media URL fetching effect. We now open R2 URLs directly instead of pulling blobs through Express.
   useEffect(() => {
-    let currentBlobUrl = null;
     const controller = new AbortController();
     
     const fetchMedia = async () => {
       if (!showFileViewer || !selectedMaterial) {
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
-          currentBlobUrl = null;
-        }
         setMediaBlob(null);
         setViewerLoading(false);
         setViewerError(null);
@@ -1202,12 +1159,12 @@ const SubjectsMenu = () => {
       setViewerError(null);
       
       try {
-        const blob = await fetchMaterialBlob(selectedMaterial.id, 'view', controller.signal);
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
+        const accessInfo = await fetchMaterialAccessInfo(selectedMaterial.id);
+        if (controller.signal.aborted) {
+          return;
         }
-        currentBlobUrl = URL.createObjectURL(blob);
-        setMediaBlob(currentBlobUrl);
+        setSelectedMaterial(prev => prev ? { ...prev, ...normalizeMaterialForUi(accessInfo) } : prev);
+        setMediaBlob(accessInfo?.viewUrl || null);
       } catch (err) {
         console.error('Error loading media:', err);
         if (err.message?.toLowerCase().includes('material not found')) {
@@ -1225,11 +1182,8 @@ const SubjectsMenu = () => {
     
     return () => {
       controller.abort();
-      if (currentBlobUrl) {
-        URL.revokeObjectURL(currentBlobUrl);
-      }
     };
-  }, [fetchMaterialBlob, handleStaleMaterial, showFileViewer, selectedMaterial?.id]);
+  }, [handleStaleMaterial, normalizeMaterialForUi, showFileViewer, selectedMaterial]);
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
@@ -1239,15 +1193,11 @@ const SubjectsMenu = () => {
     }
 
     try {
-      const blob = await fetchMaterialBlob(material.id, 'download');
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = material.fileName || material.name || 'download';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      const accessInfo = await fetchMaterialAccessInfo(material.id);
+      if (!accessInfo?.downloadUrl) {
+        throw new Error('Download URL is not available');
+      }
+      downloadMaterialUrl(accessInfo.downloadUrl, material.fileName || material.name || 'download');
       toast.success('File downloaded successfully!');
     } catch (error) {
       console.error('Error downloading file:', error);
@@ -1257,7 +1207,7 @@ const SubjectsMenu = () => {
         toast.error(error.message || 'Failed to download file. Please try again.');
       }
     }
-  }, [fetchMaterialBlob, handleStaleMaterial]);
+  }, [handleStaleMaterial]);
 
   // Function to handle material deletion
   const handleDeleteMaterial = useCallback(async (materialId) => {
@@ -1469,33 +1419,25 @@ const SubjectsMenu = () => {
       // Show loading toast
       const loadingToast = toast.loading('Uploading file...');
 
-      const formData = new FormData();
-      // Only append the first file since input.multiple = false
-      if (files[0]) {
-        formData.append('materials', files[0]);
-        console.log('Appending single file:', files[0].name);
-      }
-      formData.append('category', 'teaching_material');
-      formData.append('is_public', 'false');
-
       try {
-        const response = await api.post('/api/materials/upload', formData);
+        const file = files[0];
+        console.log('Appending single file:', file.name);
+        const initResult = await initiateMaterialUpload({
+          file,
+          category: 'teaching_material',
+          visibility: 'private'
+        });
 
-        if (response.status >= 200 && response.status < 300) {
-          const result = response.data;
-          toast.dismiss(loadingToast);
-          toast.success(result.message || 'File uploaded successfully!');
-          
-          console.log('🔄 Refreshing materials list after simple upload...');
-          // Add slight delay to ensure server processing is complete
-          setTimeout(() => {
-            fetchMaterials(true); // Force refresh materials list
-            console.log('🔄 Force materials refresh triggered');
-          }, 500);
-        } else {
-          toast.dismiss(loadingToast);
-          toast.error(response.data?.message || 'Failed to upload file');
-        }
+        await uploadFileToSignedUrl(initResult.upload, file);
+        await completeMaterialUpload(initResult.material.id);
+
+        toast.dismiss(loadingToast);
+        toast.success('File uploaded successfully!');
+        console.log('🔄 Refreshing materials list after simple upload...');
+        setTimeout(() => {
+          fetchMaterials(true);
+          console.log('🔄 Force materials refresh triggered');
+        }, 500);
       } catch (error) {
         console.error('Error uploading file:', error);
         toast.dismiss(loadingToast);
@@ -1620,13 +1562,11 @@ const SubjectsMenu = () => {
       };
 
       let response;
-      let lastError;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
           response = await api.get('/api/materials/my-materials', { params });
           break;
         } catch (error) {
-          lastError = error;
           if (attempt === 1 && (error.code === 'ERR_NETWORK' || !error.response)) {
             await new Promise(resolve => setTimeout(resolve, 500));
             continue;
@@ -1767,64 +1707,30 @@ const SubjectsMenu = () => {
       
       console.log('Unique files after deduplication:', uniqueFiles.map(f => f.name));
       
-      const formData = new FormData();
-      
-      // Clear tracking to prevent any residual entries
-      const processedFileNames = new Set();
-      
-      uniqueFiles.forEach((file, index) => {
-        const fileKey = `${file.name}_${file.size}_${file.lastModified}`;
-        
-        if (processedFileNames.has(fileKey)) {
-          console.error(`❌ DUPLICATE FILE DETECTED IN FORMDATA LOOP: ${file.name}`);
-          return; // Skip this file
-        }
-        
-        processedFileNames.add(fileKey);
+      const uploadedIds = [];
+
+      for (const [index, file] of uniqueFiles.entries()) {
         console.log(`✅ Appending file ${index + 1}/${uniqueFiles.length}:`, file.name);
-        formData.append('materials', file);
-      });
-      
-      // Critical debugging: Check if FormData has the correct number of files
-      const materialsEntries = Array.from(formData.getAll('materials'));
-      console.log('📊 FORMDATA ANALYSIS:', {
-        materialsCount: materialsEntries.length,
-        materialsDetails: materialsEntries.map(f => ({ name: f.name, size: f.size, type: f.type })),
-        allFormDataKeys: Array.from(formData.keys()),
-        formDataEntries: Object.fromEntries(formData.entries())
-      });
-      
-      // Alert if there are more files in FormData than expected
-      if (materialsEntries.length > uniqueFiles.length) {
-        console.error(`❌ CRITICAL: FormData has ${materialsEntries.length} files but we only processed ${uniqueFiles.length} unique files!`);
-      }
-      
-      formData.append('subject_id', selectedSubject.id);
-      formData.append('category', metadata.category || 'teaching_material');
-      formData.append('is_public', metadata.is_public || false);
-      if (metadata.class_id) {
-        formData.append('class_id', metadata.class_id);
-      }
-      if (metadata.tags) {
-        formData.append('tags', metadata.tags);
+        const initResult = await initiateMaterialUpload({
+          file,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          description: metadata.description,
+          subjectId: selectedSubject.id,
+          classId: metadata.class_id || undefined,
+          category: metadata.category || 'teaching_material',
+          tags: metadata.tags || '',
+          visibility: metadata.is_public ? 'public' : 'private'
+        });
+
+        await uploadFileToSignedUrl(initResult.upload, file);
+        await completeMaterialUpload(initResult.material.id);
+        uploadedIds.push(initResult.material.id);
       }
 
-      const response = await api.post('/api/materials/upload', formData);
-
-      console.log('Upload response status:', response.status);
-
-      if (response.status >= 200 && response.status < 300) {
-        const result = response.data;
-        console.log('Upload success response:', result);
-        toast.success(result.message || `${uniqueFiles.length} file(s) uploaded successfully`);
-        uploadCompleted = true;
-        // Re-enabled: Refresh materials (duplicate key issue was fixed)
-        handleMaterialsClick(selectedSubject);
-        console.log('✅ Post-upload refresh enabled - duplicate keys fixed');
-      } else {
-        console.error('Upload error response:', response.data);
-        toast.error(response.data?.message || 'Failed to upload files');
-      }
+      toast.success(`${uploadedIds.length} file(s) uploaded successfully`);
+      uploadCompleted = true;
+      handleMaterialsClick(selectedSubject);
+      console.log('✅ Post-upload refresh enabled - direct R2 upload completed');
     } catch (error) {
       console.error('Error uploading materials:', error);
       toast.error(error.response?.data?.message || 'Failed to upload materials');
@@ -1835,7 +1741,7 @@ const SubjectsMenu = () => {
       console.log('Upload completed successfully:', uploadCompleted);
       console.log('Active uploads remaining:', activeUploads.current.size);
     }
-  }, [api, selectedSubject, handleMaterialsClick]);
+  }, [selectedSubject, handleMaterialsClick]);
 
 
   const renderOverviewTab = () => (

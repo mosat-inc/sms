@@ -949,29 +949,93 @@ const testConnection = async () => {
         await connection.execute(`
             CREATE TABLE IF NOT EXISTS teaching_materials (
                 id INT PRIMARY KEY AUTO_INCREMENT,
+                school_id INT NULL,
                 teacher_id INT NOT NULL,
+                uploaded_by INT NULL,
                 subject_id INT,
+                class_id INT,
                 title VARCHAR(255) NOT NULL,
                 description TEXT,
                 file_name VARCHAR(255) NOT NULL,
                 original_name VARCHAR(255) NOT NULL,
-                file_path VARCHAR(500) NOT NULL,
+                file_path VARCHAR(500) NULL,
+                object_key VARCHAR(700) NULL,
+                file_url VARCHAR(1024) NULL,
                 file_type VARCHAR(100) NOT NULL,
                 file_size INT NOT NULL,
+                size_bytes BIGINT NULL,
                 mime_type VARCHAR(100) NOT NULL,
                 category ENUM('lesson_plan', 'teaching_material', 'syllabus', 'worksheet', 'assessment', 'other') DEFAULT 'teaching_material',
                 class_level INT,
                 is_public BOOLEAN DEFAULT FALSE,
+                visibility_scope ENUM('private', 'school', 'public') DEFAULT 'private',
+                access_role VARCHAR(50) DEFAULT 'teacher',
+                upload_status ENUM('pending', 'ready', 'failed') DEFAULT 'ready',
+                storage_provider ENUM('local', 'r2') DEFAULT 'local',
                 download_count INT DEFAULT 0,
                 tags JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE SET NULL,
                 FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL,
+                FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL,
                 INDEX idx_teacher_subject (teacher_id, subject_id),
-                INDEX idx_category_level (category, class_level)
+                INDEX idx_category_level (category, class_level),
+                INDEX idx_materials_school_visibility (school_id, visibility_scope),
+                INDEX idx_materials_object_key (object_key(255))
             )
         `);
+
+        // Keep the legacy table backward compatible while enabling R2 metadata storage.
+        const teachingMaterialColumns = [
+            [`ALTER TABLE teaching_materials ADD COLUMN school_id INT NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN uploaded_by INT NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN class_id INT NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials MODIFY COLUMN file_path VARCHAR(500) NULL`, 'ER_BAD_NULL_ERROR'],
+            [`ALTER TABLE teaching_materials ADD COLUMN object_key VARCHAR(700) NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN file_url VARCHAR(1024) NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN size_bytes BIGINT NULL`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN visibility_scope ENUM('private', 'school', 'public') DEFAULT 'private'`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN access_role VARCHAR(50) DEFAULT 'teacher'`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN upload_status ENUM('pending', 'ready', 'failed') DEFAULT 'ready'`, 'ER_DUP_FIELDNAME'],
+            [`ALTER TABLE teaching_materials ADD COLUMN storage_provider ENUM('local', 'r2') DEFAULT 'local'`, 'ER_DUP_FIELDNAME']
+        ];
+
+        for (const [sql, duplicateCode] of teachingMaterialColumns) {
+            try {
+                await connection.execute(sql);
+            } catch (error) {
+                if (!duplicateCode || error.code !== duplicateCode) {
+                    console.warn(`⚠️  teaching_materials schema update skipped: ${error.code || error.message}`);
+                }
+            }
+        }
+
+        try {
+            await connection.execute(`ALTER TABLE teaching_materials ADD CONSTRAINT fk_teaching_materials_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE SET NULL`);
+        } catch (error) {
+            if (!['ER_DUP_KEYNAME', 'ER_FK_DUP_NAME', 'ER_CANT_CREATE_TABLE'].includes(error.code)) {
+                console.warn(`⚠️  teaching_materials school FK skipped: ${error.code || error.message}`);
+            }
+        }
+
+        try {
+            await connection.execute(`ALTER TABLE teaching_materials ADD CONSTRAINT fk_teaching_materials_uploaded_by FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL`);
+        } catch (error) {
+            if (!['ER_DUP_KEYNAME', 'ER_FK_DUP_NAME', 'ER_CANT_CREATE_TABLE'].includes(error.code)) {
+                console.warn(`⚠️  teaching_materials uploaded_by FK skipped: ${error.code || error.message}`);
+            }
+        }
+
+        try {
+            await connection.execute(`ALTER TABLE teaching_materials ADD CONSTRAINT fk_teaching_materials_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL`);
+        } catch (error) {
+            if (!['ER_DUP_KEYNAME', 'ER_FK_DUP_NAME', 'ER_CANT_CREATE_TABLE'].includes(error.code)) {
+                console.warn(`⚠️  teaching_materials class FK skipped: ${error.code || error.message}`);
+            }
+        }
         
         // Create curriculum topics table for subject progress tracking
         await connection.execute(`

@@ -13,6 +13,7 @@
     "install-server": "npm install",
     "install-all": "npm run install-server && npm run install-client",
     "migrate": "node server/scripts/run-migrations.js",
+    "migrate-materials-r2": "node server/scripts/migrate-materials-to-r2.js",
     "reset-admins": "node server/scripts/reset-admin-passwords.js",
     "list-admins": "node server/scripts/list-admins.js",
     "create-admins": "node server/scripts/create-admins.js",
@@ -31,6 +32,8 @@
   "author": "UBUNIFU SEC",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1012.0",
+    "@aws-sdk/s3-request-presigner": "^3.1012.0",
     "axios": "^1.11.0",
     "bcryptjs": "^2.4.3",
     "chart.js": "^4.5.0",

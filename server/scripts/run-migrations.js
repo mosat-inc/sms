@@ -6,6 +6,7 @@ const { addAdmissionSequencesAndParentAccess } = require('../migrations/add_admi
 const { addPesapalPaymentIntents } = require('../migrations/add_pesapal_payment_intents');
 const { addFaceAttendanceTables } = require('../migrations/add_face_attendance_tables');
 const { updateDefaultSchoolFeeTo75000 } = require('../migrations/update_default_school_fee_75000');
+const { addR2MaterialStorage } = require('../migrations/add_r2_material_storage');
 const { initializeDatabase, testConnection } = require('../config/database');
 
 /**
@@ -53,6 +54,9 @@ const runAllMigrations = async () => {
 
         console.log('\n📝 8. Updating default school fee to 75,000...');
         await updateDefaultSchoolFeeTo75000();
+
+        console.log('\n📝 9. Adding R2 material storage columns...');
+        await addR2MaterialStorage();
         
         console.log('\n═══════════════════════════════════════════════');
         console.log('🎉 All migrations completed successfully!');
