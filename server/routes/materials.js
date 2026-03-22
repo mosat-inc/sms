@@ -188,7 +188,7 @@ router.get('/my-materials', authenticateToken, async (req, res) => {
             ${whereSql}
         `, params);
 
-        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row)));
+        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row, { includeAccessUrls: false })));
 
         res.json({
             success: true,
@@ -231,7 +231,7 @@ router.get('/public', authenticateToken, async (req, res) => {
             ${whereSql}
         `, params);
 
-        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row)));
+        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row, { includeAccessUrls: false })));
         res.json({
             success: true,
             data,
@@ -384,7 +384,7 @@ router.get('/', authenticateToken, async (req, res) => {
             ${whereSql}
         `, params);
 
-        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row)));
+        const data = await Promise.all(rows.map(row => normalizeMaterialRecord(row, { includeAccessUrls: false })));
         res.json({
             success: true,
             data,
