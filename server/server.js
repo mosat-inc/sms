@@ -46,6 +46,49 @@ const smsRoutes = require('./routes/sms');
 
 const app = express();
 const port = process.env.PORT || 5000;
+const toOrigin = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    try {
+        return new URL(raw).origin;
+    } catch (_error) {
+        return null;
+    }
+};
+
+const buildCspConnectSrc = () => {
+    const sources = new Set([
+        "'self'",
+        'http://localhost:5000',
+        'http://localhost:3000'
+    ]);
+
+    const envOrigins = [
+        process.env.FRONTEND_URL,
+        process.env.REACT_APP_API_URL,
+        process.env.REACT_APP_API_BASE_URL,
+        process.env.R2_PUBLIC_BASE_URL
+    ];
+
+    envOrigins
+        .map(toOrigin)
+        .filter(Boolean)
+        .forEach((origin) => sources.add(origin));
+
+    const r2AccountId = String(process.env.R2_ACCOUNT_ID || '').trim();
+    if (r2AccountId) {
+        sources.add(`https://${r2AccountId}.r2.cloudflarestorage.com`);
+    }
+
+    const r2PublicOrigin = toOrigin(process.env.R2_PUBLIC_BASE_URL);
+    if (r2PublicOrigin) {
+        sources.add(r2PublicOrigin);
+    }
+
+    return Array.from(sources);
+};
+
+const cspConnectSrc = buildCspConnectSrc();
 const hostedFaceModelsDir = path.join(__dirname, '../client/public/models');
 const hostedFaceModelFiles = new Set([
     'tiny_face_detector_model-weights_manifest.json',
@@ -148,7 +191,7 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "https:", "data:"],
-            connectSrc: ["'self'", "http://localhost:5000", "http://localhost:3000"],
+            connectSrc: cspConnectSrc,
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"]
         }
     }
