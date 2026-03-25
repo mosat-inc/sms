@@ -197,7 +197,7 @@ const getMaterialById = async (materialId) => {
     const meta = await getMaterialSchemaMeta();
     const materialSelect = buildMaterialSelect(meta);
     const uploadedBySql = getUploadedBySql(meta);
-    const [rows] = await pool.execute(`
+    const [rows] = await pool.query(`
         SELECT ${materialSelect},
                s.name AS subject_name,
                s.code AS subject_code,
@@ -254,7 +254,7 @@ router.get('/my-materials', authenticateToken, async (req, res) => {
         const { whereSql, params, meta } = await buildListWhereClause(req, req.query, { ownOnly: true });
         const materialSelect = buildMaterialSelect(meta);
 
-        const [rows] = await pool.execute(`
+        const [rows] = await pool.query(`
             SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
@@ -263,7 +263,7 @@ router.get('/my-materials', authenticateToken, async (req, res) => {
             LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
 
-        const [countRows] = await pool.execute(`
+        const [countRows] = await pool.query(`
             SELECT COUNT(*) AS total
             FROM teaching_materials tm
             ${whereSql}
@@ -298,7 +298,7 @@ router.get('/public', authenticateToken, async (req, res) => {
         const materialSelect = buildMaterialSelect(meta);
         const uploadedBySql = getUploadedBySql(meta);
 
-        const [rows] = await pool.execute(`
+        const [rows] = await pool.query(`
             SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code, u.first_name, u.last_name
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
@@ -308,7 +308,7 @@ router.get('/public', authenticateToken, async (req, res) => {
             LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
 
-        const [countRows] = await pool.execute(`
+        const [countRows] = await pool.query(`
             SELECT COUNT(*) AS total
             FROM teaching_materials tm
             ${whereSql}
@@ -453,7 +453,7 @@ router.get('/', authenticateToken, async (req, res) => {
         const { whereSql, params, meta } = await buildListWhereClause(req, req.query);
         const materialSelect = buildMaterialSelect(meta);
 
-        const [rows] = await pool.execute(`
+        const [rows] = await pool.query(`
             SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
@@ -462,7 +462,7 @@ router.get('/', authenticateToken, async (req, res) => {
             LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
 
-        const [countRows] = await pool.execute(`
+        const [countRows] = await pool.query(`
             SELECT COUNT(*) AS total
             FROM teaching_materials tm
             ${whereSql}
