@@ -2180,17 +2180,6 @@ const SubjectsMenu = () => {
                   // Fallback: show download option if iframe fails
                   setViewerError('PDF preview not supported in this browser. Please download to view.');
                 }}
-                onLoad={(e) => {
-                  // Check if iframe loaded successfully
-                  try {
-                    const iframeDoc = e.target.contentDocument || e.target.contentWindow.document;
-                    if (!iframeDoc || iframeDoc.body.children.length === 0) {
-                      setViewerError('PDF preview not available. Please download to view.');
-                    }
-                  } catch (err) {
-                    // Cross-origin access is expected for signed preview URLs.
-                  }
-                }}
               />
             </div>
           );
