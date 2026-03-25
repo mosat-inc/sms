@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { FaBook, FaUpload, FaDownload, FaEye, FaEdit, FaTrash, FaPlus, FaChartLine, FaFileAlt, FaUsers, FaFilter, FaTasks, FaCheckCircle, FaExclamationTriangle, FaPlay, FaFilePdf, FaFileWord, FaFileImage, FaVideo, FaFileAudio, FaFile, FaTimes, FaExpand, FaCompress, FaSearch } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import styled from 'styled-components';
@@ -1016,7 +1016,6 @@ const SubjectsMenu = () => {
   }), [formatFileSize]);
 
   const fetchMaterials = useCallback(async (forceRefresh = false) => {
-    console.log('🔄 fetchMaterials called, forceRefresh:', forceRefresh);
     try {
       // Add timestamp to prevent caching if force refresh
       const url = forceRefresh 
@@ -1026,8 +1025,6 @@ const SubjectsMenu = () => {
       const { data: result } = await api.get(url);
 
       if (result?.success) {
-        console.log('📁 Raw materials from API:', result.data.length);
-        
         // Transform API data to match component expectations
         const transformedMaterials = result.data.map(normalizeMaterialForUi);
         
@@ -1041,10 +1038,7 @@ const SubjectsMenu = () => {
           return acc;
         }, []);
         
-        console.log(`📁 Materials after deduplication: ${transformedMaterials.length} -> ${uniqueMaterials.length}`);
-        console.log('📁 Setting materials state with:', uniqueMaterials.map(m => ({ id: m.id, name: m.name })));
         setMaterials(uniqueMaterials);
-        console.log('✅ Materials state updated successfully');
       } else {
         console.error('Failed to fetch materials:', result?.message || 'Unknown error');
         setMaterials([]);
@@ -1062,12 +1056,6 @@ const SubjectsMenu = () => {
     fetchMaterials();
   }, [fetchMaterials]);
   
-  // Fetch topics after subjects are loaded
-  useEffect(() => {
-    if (subjects.length > 0) {
-      fetchTopics();
-    }
-  }, [subjects]);
   // Fetch topics after subjects are loaded
   useEffect(() => {
     if (subjects.length > 0) {
@@ -1143,12 +1131,15 @@ const SubjectsMenu = () => {
     toast.error(message || 'This material record is stale. Re-upload the file to restore access.');
   }, [fetchMaterials, handleCloseFileViewer, selectedMaterial]);
 
+  const selectedMaterialId = selectedMaterial?.id || null;
+
   // File viewer media URL fetching effect. We now open R2 URLs directly instead of pulling blobs through Express.
   useEffect(() => {
     const controller = new AbortController();
+    const activeMaterial = selectedMaterial;
     
     const fetchMedia = async () => {
-      if (!showFileViewer || !selectedMaterial) {
+      if (!showFileViewer || !activeMaterial) {
         setMediaBlob(null);
         setViewerLoading(false);
         setViewerError(null);
@@ -1159,16 +1150,21 @@ const SubjectsMenu = () => {
       setViewerError(null);
       
       try {
-        const accessInfo = await fetchMaterialAccessInfo(selectedMaterial.id);
+        const accessInfo = await fetchMaterialAccessInfo(activeMaterial.id);
         if (controller.signal.aborted) {
           return;
         }
-        setSelectedMaterial(prev => prev ? { ...prev, ...normalizeMaterialForUi(accessInfo) } : prev);
+        setSelectedMaterial(prev => {
+          if (!prev || prev.id !== activeMaterial.id) {
+            return prev;
+          }
+          return { ...prev, ...normalizeMaterialForUi(accessInfo) };
+        });
         setMediaBlob(accessInfo?.viewUrl || null);
       } catch (err) {
         console.error('Error loading media:', err);
         if (err.message?.toLowerCase().includes('material not found')) {
-          handleStaleMaterial(selectedMaterial, 'This material no longer exists on the server. Re-upload it to restore preview.');
+          handleStaleMaterial(activeMaterial, 'This material no longer exists on the server. Re-upload it to restore preview.');
           setViewerError('Material not found');
         } else {
           setViewerError(err.message || 'Failed to load preview');
@@ -1183,7 +1179,7 @@ const SubjectsMenu = () => {
     return () => {
       controller.abort();
     };
-  }, [handleStaleMaterial, normalizeMaterialForUi, showFileViewer, selectedMaterial]);
+  }, [handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
@@ -1270,40 +1266,29 @@ const SubjectsMenu = () => {
     }
   }, [api, fetchMaterials, selectedMaterial, handleCloseFileViewer, deletingMaterials]);
 
-  // Function to filter materials
-  const getFilteredMaterials = useCallback(() => {
-    // FIRST: Deduplicate materials by ID to prevent React key conflicts
+  const filteredMaterials = useMemo(() => {
     const uniqueMaterials = materials.reduce((acc, material) => {
-      const existingIndex = acc.findIndex(m => m.id === material.id);
-      if (existingIndex === -1) {
+      if (!acc.find(m => m.id === material.id)) {
         acc.push(material);
-      } else {
-        console.warn(`⚠️ Duplicate material ID detected and removed: ${material.id} (${material.name})`);
       }
       return acc;
     }, []);
-    
-    console.log(`📊 Materials deduplication: ${materials.length} -> ${uniqueMaterials.length}`);
-    
-    // THEN: Apply filters
-    const filtered = uniqueMaterials.filter(material => {
-      const matchesSearch = !materialsFilters.search || 
+
+    return uniqueMaterials.filter(material => {
+      const matchesSearch = !materialsFilters.search ||
         material.name?.toLowerCase().includes(materialsFilters.search.toLowerCase());
-      
-      const matchesSubject = !materialsFilters.subject || 
+
+      const matchesSubject = !materialsFilters.subject ||
         material.subject?.toLowerCase().includes(materialsFilters.subject.toLowerCase());
-      
-      const matchesCategory = !materialsFilters.category || 
+
+      const matchesCategory = !materialsFilters.category ||
         material.category?.toLowerCase().includes(materialsFilters.category.toLowerCase());
-        
-      const matchesFileType = !materialsFilters.fileType || 
+
+      const matchesFileType = !materialsFilters.fileType ||
         getFileIcon(material.name, material.mimeType).type === materialsFilters.fileType;
-      
+
       return matchesSearch && matchesSubject && matchesCategory && matchesFileType;
     });
-    
-    console.log(`📊 Filtered materials for rendering: ${filtered.length}`);
-    return filtered;
   }, [materials, materialsFilters, getFileIcon]);
 
   const fetchSubjects = async () => {
@@ -1832,7 +1817,6 @@ const SubjectsMenu = () => {
   );
 
   const renderMaterialsTab = () => {
-    const filteredMaterials = getFilteredMaterials();
     const materialStats = {
       total: materials.length,
       documents: materials.filter(m => ['pdf', 'doc'].includes(getFileIcon(m.name).type)).length,
@@ -2166,8 +2150,7 @@ const SubjectsMenu = () => {
                       setViewerError('PDF preview not available. Please download to view.');
                     }
                   } catch (err) {
-                    // Cross-origin or security error - this is expected
-                    console.log('PDF loaded in iframe (cross-origin)');
+                    // Cross-origin access is expected for signed preview URLs.
                   }
                 }}
               />
