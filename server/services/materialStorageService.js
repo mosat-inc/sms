@@ -18,7 +18,7 @@ const FILE_RULES = [
         group: 'pdf',
         extensions: ['.pdf'],
         mimeTypes: ['application/pdf'],
-        maxSizeBytes: 25 * 1024 * 1024,
+        maxSizeBytes: 100 * 1024 * 1024,
         cacheControl: 'public, max-age=31536000, immutable'
     },
     {
