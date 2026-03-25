@@ -944,6 +944,118 @@ const ProgressTracker = styled.div`
   }
 `;
 
+const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
+  const containerRef = useRef(null);
+  const [isRendering, setIsRendering] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const renderPdf = async () => {
+      if (!fileUrl || !containerRef.current) {
+        setIsRendering(false);
+        return;
+      }
+
+      setIsRendering(true);
+      onError(null);
+      containerRef.current.innerHTML = '';
+
+      try {
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `${process.env.PUBLIC_URL || ''}/pdf.worker.min.mjs`;
+
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to load PDF preview (${response.status})`);
+        }
+
+        const pdfData = await response.arrayBuffer();
+        if (cancelled) {
+          return;
+        }
+
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdfDocument = await loadingTask.promise;
+        const container = containerRef.current;
+
+        for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+          if (cancelled || !container) {
+            break;
+          }
+
+          const page = await pdfDocument.getPage(pageNumber);
+          const unscaledViewport = page.getViewport({ scale: 1 });
+          const availableWidth = Math.max(container.clientWidth - 32, 320);
+          const scale = availableWidth / unscaledViewport.width;
+          const viewport = page.getViewport({ scale });
+
+          const pageWrapper = document.createElement('div');
+          pageWrapper.style.display = 'flex';
+          pageWrapper.style.justifyContent = 'center';
+          pageWrapper.style.marginBottom = '16px';
+
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.maxWidth = '100%';
+          canvas.style.height = 'auto';
+          canvas.style.borderRadius = '8px';
+          canvas.style.boxShadow = '0 12px 30px rgba(15, 23, 42, 0.25)';
+          canvas.style.background = '#fff';
+
+          pageWrapper.appendChild(canvas);
+          container.appendChild(pageWrapper);
+
+          await page.render({
+            canvasContext: context,
+            viewport,
+          }).promise;
+        }
+
+        if (!cancelled) {
+          setIsRendering(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('PDF.js render failed:', error);
+          onError(error.message || 'Failed to render PDF preview');
+          setIsRendering(false);
+        }
+      }
+    };
+
+    renderPdf();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileUrl, onError]);
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {isRendering && (
+        <div className="loading-preview">
+          <div className="spinner"></div>
+          <p>Rendering PDF preview...</p>
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        aria-label={title}
+        style={{
+          width: '100%',
+          minHeight: '600px',
+          overflowY: 'auto',
+          padding: '16px',
+          display: isRendering ? 'none' : 'block'
+        }}
+      />
+    </div>
+  );
+};
+
 const SubjectsMenu = () => {
   const { api } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
@@ -988,7 +1100,6 @@ const SubjectsMenu = () => {
   
   // Global upload tracking to prevent duplicates
   const activeUploads = useRef(new Set());
-  const previewObjectUrlRef = useRef(null);
 
   // Helper function to format file size
   const formatFileSize = useCallback((bytes) => {
@@ -1111,10 +1222,6 @@ const SubjectsMenu = () => {
   
   // Function to close file viewer and cleanup
   const handleCloseFileViewer = useCallback(() => {
-    if (previewObjectUrlRef.current) {
-      URL.revokeObjectURL(previewObjectUrlRef.current);
-      previewObjectUrlRef.current = null;
-    }
     setMediaBlob(null);
     setViewerError(null);
     setViewerLoading(false);
@@ -1168,28 +1275,7 @@ const SubjectsMenu = () => {
           return { ...prev, ...normalizeMaterialForUi(accessInfo) };
         });
 
-        const { type } = getFileIcon(activeMaterial.name, activeMaterial.mimeType);
-        if (type === 'pdf' && accessInfo?.viewUrl) {
-          const response = await fetch(accessInfo.viewUrl, { signal: controller.signal });
-          if (!response.ok) {
-            throw new Error(`Failed to load PDF preview (${response.status})`);
-          }
-
-          const pdfBlob = await response.blob();
-          if (controller.signal.aborted) {
-            return;
-          }
-
-          if (previewObjectUrlRef.current) {
-            URL.revokeObjectURL(previewObjectUrlRef.current);
-          }
-
-          const objectUrl = URL.createObjectURL(pdfBlob);
-          previewObjectUrlRef.current = objectUrl;
-          setMediaBlob(objectUrl);
-        } else {
-          setMediaBlob(accessInfo?.viewUrl || null);
-        }
+        setMediaBlob(accessInfo?.viewUrl || null);
       } catch (err) {
         if (err.name === 'AbortError') {
           return;
@@ -1210,12 +1296,8 @@ const SubjectsMenu = () => {
     
     return () => {
       controller.abort();
-      if (previewObjectUrlRef.current) {
-        URL.revokeObjectURL(previewObjectUrlRef.current);
-        previewObjectUrlRef.current = null;
-      }
     };
-  }, [getFileIcon, handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
+  }, [handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
@@ -2164,20 +2246,10 @@ const SubjectsMenu = () => {
         case 'pdf':
           return (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <iframe 
-                src={`${mediaBlob}#toolbar=1&navpanes=1&scrollbar=1`}
+              <PdfCanvasPreview
+                fileUrl={mediaBlob}
                 title={selectedMaterial.name}
-                width="100%"
-                height="100%"
-                style={{ 
-                  border: 'none', 
-                  minHeight: '600px',
-                  borderRadius: '8px'
-                }}
-                onError={() => {
-                  // Fallback: show download option if iframe fails
-                  setViewerError('PDF preview not supported in this browser. Please download to view.');
-                }}
+                onError={setViewerError}
               />
             </div>
           );
