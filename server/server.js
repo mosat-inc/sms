@@ -92,7 +92,35 @@ const buildCspConnectSrc = () => {
     return Array.from(sources);
 };
 
+const buildCspFrameSrc = () => {
+    const sources = new Set([
+        "'self'",
+        'blob:'
+    ]);
+
+    const envOrigins = [
+        process.env.R2_PUBLIC_BASE_URL
+    ];
+
+    envOrigins
+        .map(toOrigin)
+        .filter(Boolean)
+        .forEach((origin) => sources.add(origin));
+
+    const r2AccountId = String(process.env.R2_ACCOUNT_ID || '').trim();
+    const r2BucketName = String(process.env.R2_BUCKET_NAME || '').trim();
+    if (r2AccountId) {
+        sources.add(`https://${r2AccountId}.r2.cloudflarestorage.com`);
+        if (r2BucketName) {
+            sources.add(`https://${r2BucketName}.${r2AccountId}.r2.cloudflarestorage.com`);
+        }
+    }
+
+    return Array.from(sources);
+};
+
 const cspConnectSrc = buildCspConnectSrc();
+const cspFrameSrc = buildCspFrameSrc();
 const hostedFaceModelsDir = path.join(__dirname, '../client/public/models');
 const hostedFaceModelFiles = new Set([
     'tiny_face_detector_model-weights_manifest.json',
@@ -196,6 +224,7 @@ app.use(helmet({
             scriptSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "https:", "data:"],
             connectSrc: cspConnectSrc,
+            frameSrc: cspFrameSrc,
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"]
         }
     }
