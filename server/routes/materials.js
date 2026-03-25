@@ -23,6 +23,74 @@ const isValidParam = (param) => param !== null && param !== undefined && param !
 
 const parseBoolean = (value) => value === true || value === 'true' || value === 1 || value === '1';
 
+let cachedMaterialSchemaMeta = null;
+
+const getMaterialSchemaMeta = async () => {
+    if (cachedMaterialSchemaMeta) {
+        return cachedMaterialSchemaMeta;
+    }
+
+    const [rows] = await pool.execute(`
+        SELECT COLUMN_NAME
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'teaching_materials'
+    `);
+
+    const columns = new Set(rows.map(row => row.COLUMN_NAME));
+    cachedMaterialSchemaMeta = {
+        hasSchoolId: columns.has('school_id'),
+        hasUploadedBy: columns.has('uploaded_by'),
+        hasClassId: columns.has('class_id'),
+        hasObjectKey: columns.has('object_key'),
+        hasFileUrl: columns.has('file_url'),
+        hasSizeBytes: columns.has('size_bytes'),
+        hasVisibilityScope: columns.has('visibility_scope'),
+        hasAccessRole: columns.has('access_role'),
+        hasUploadStatus: columns.has('upload_status'),
+        hasStorageProvider: columns.has('storage_provider')
+    };
+
+    return cachedMaterialSchemaMeta;
+};
+
+const buildMaterialSelect = (meta, alias = 'tm') => {
+    const uploadedByExpr = meta.hasUploadedBy ? `COALESCE(${alias}.uploaded_by, ${alias}.teacher_id)` : `${alias}.teacher_id`;
+    const schoolIdExpr = meta.hasSchoolId ? `${alias}.school_id` : 'NULL';
+    const classIdExpr = meta.hasClassId ? `${alias}.class_id` : 'NULL';
+    const objectKeyExpr = meta.hasObjectKey ? `${alias}.object_key` : 'NULL';
+    const fileUrlExpr = meta.hasFileUrl ? `${alias}.file_url` : 'NULL';
+    const sizeBytesExpr = meta.hasSizeBytes ? `COALESCE(${alias}.size_bytes, ${alias}.file_size)` : `${alias}.file_size`;
+    const visibilityExpr = meta.hasVisibilityScope
+        ? `COALESCE(${alias}.visibility_scope, CASE WHEN ${alias}.is_public = 1 THEN 'public' ELSE 'private' END)`
+        : `CASE WHEN ${alias}.is_public = 1 THEN 'public' ELSE 'private' END`;
+    const accessRoleExpr = meta.hasAccessRole ? `COALESCE(${alias}.access_role, 'teacher')` : `'teacher'`;
+    const uploadStatusExpr = meta.hasUploadStatus
+        ? `COALESCE(${alias}.upload_status, CASE WHEN ${alias}.file_path IS NOT NULL AND ${alias}.file_path <> '' THEN 'ready' ELSE 'pending' END)`
+        : `CASE WHEN ${alias}.file_path IS NOT NULL AND ${alias}.file_path <> '' THEN 'ready' ELSE 'pending' END`;
+    const storageProviderExpr = meta.hasStorageProvider ? `COALESCE(${alias}.storage_provider, 'local')` : `'local'`;
+
+    return `
+        ${alias}.*,
+        ${schoolIdExpr} AS schema_school_id,
+        ${uploadedByExpr} AS schema_uploaded_by,
+        ${classIdExpr} AS schema_class_id,
+        ${objectKeyExpr} AS schema_object_key,
+        ${fileUrlExpr} AS schema_file_url,
+        ${sizeBytesExpr} AS schema_size_bytes,
+        ${visibilityExpr} AS schema_visibility_scope,
+        ${accessRoleExpr} AS schema_access_role,
+        ${uploadStatusExpr} AS schema_upload_status,
+        ${storageProviderExpr} AS schema_storage_provider
+    `;
+};
+
+const getUploadedBySql = (meta, alias = 'tm') => meta.hasUploadedBy ? `COALESCE(${alias}.uploaded_by, ${alias}.teacher_id)` : `${alias}.teacher_id`;
+const getSchoolIdSql = (meta, alias = 'tm') => meta.hasSchoolId ? `${alias}.school_id` : 'NULL';
+const getVisibilitySql = (meta, alias = 'tm') => meta.hasVisibilityScope
+    ? `COALESCE(${alias}.visibility_scope, CASE WHEN ${alias}.is_public = 1 THEN 'public' ELSE 'private' END)`
+    : `CASE WHEN ${alias}.is_public = 1 THEN 'public' ELSE 'private' END`;
+
 const getRequesterSchoolId = async (req) => {
     if (req.user?.schoolId) {
         return Number(req.user.schoolId);
@@ -50,16 +118,18 @@ const canAccessMaterial = (record, req) => {
         return true;
     }
 
-    if (Number(record.teacher_id || record.uploaded_by) === Number(req.user.id)) {
+    if (Number(record.schema_uploaded_by || record.uploaded_by || record.teacher_id) === Number(req.user.id)) {
         return true;
     }
 
-    if (record.visibility_scope === 'public') {
+    const visibility = record.schema_visibility_scope || record.visibility_scope;
+    if (visibility === 'public') {
         return true;
     }
 
-    if (record.visibility_scope === 'school') {
-        return Number(record.school_id || 0) > 0 && Number(record.school_id) === Number(req.user.schoolId || 0);
+    if (visibility === 'school') {
+        const schoolId = Number(record.schema_school_id || record.school_id || 0);
+        return schoolId > 0 && schoolId === Number(req.user.schoolId || 0);
     }
 
     return false;
@@ -69,19 +139,25 @@ const buildListWhereClause = async (req, queryParams, { ownOnly = false, publicO
     const params = [];
     const conditions = [];
     const schoolId = await getRequesterSchoolId(req);
+    const meta = await getMaterialSchemaMeta();
+    const uploadedBySql = getUploadedBySql(meta);
+    const visibilitySql = getVisibilitySql(meta);
+    const schoolIdSql = getSchoolIdSql(meta);
 
     if (ownOnly) {
-        conditions.push('tm.uploaded_by = ?');
+        conditions.push(`${uploadedBySql} = ?`);
         params.push(req.user.id);
     } else if (publicOnly) {
-        conditions.push(`tm.upload_status = 'ready'`);
-        conditions.push(`(tm.visibility_scope = 'public' OR (tm.visibility_scope = 'school' AND tm.school_id = ?))`);
+        if (meta.hasUploadStatus) {
+            conditions.push(`tm.upload_status = 'ready'`);
+        }
+        conditions.push(`(${visibilitySql} = 'public' OR (${visibilitySql} = 'school' AND ${schoolIdSql} = ?))`);
         params.push(schoolId || 0);
     } else if (req.user.role !== 'admin') {
         conditions.push(`(
-            tm.uploaded_by = ?
-            OR tm.visibility_scope = 'public'
-            OR (tm.visibility_scope = 'school' AND tm.school_id = ?)
+            ${uploadedBySql} = ?
+            OR ${visibilitySql} = 'public'
+            OR (${visibilitySql} = 'school' AND ${schoolIdSql} = ?)
         )`);
         params.push(req.user.id, schoolId || 0);
     }
@@ -112,20 +188,24 @@ const buildListWhereClause = async (req, queryParams, { ownOnly = false, publicO
 
     return {
         whereSql: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
-        params
+        params,
+        meta
     };
 };
 
 const getMaterialById = async (materialId) => {
+    const meta = await getMaterialSchemaMeta();
+    const materialSelect = buildMaterialSelect(meta);
+    const uploadedBySql = getUploadedBySql(meta);
     const [rows] = await pool.execute(`
-        SELECT tm.*,
+        SELECT ${materialSelect},
                s.name AS subject_name,
                s.code AS subject_code,
                u.first_name,
                u.last_name
         FROM teaching_materials tm
         LEFT JOIN subjects s ON tm.subject_id = s.id
-        LEFT JOIN users u ON tm.uploaded_by = u.id
+        LEFT JOIN users u ON ${uploadedBySql} = u.id
         WHERE tm.id = ?
         LIMIT 1
     `, [materialId]);
@@ -171,10 +251,11 @@ router.get('/my-materials', authenticateToken, async (req, res) => {
     try {
         const limit = Math.min(Number(req.query.limit || 50), 100);
         const offset = Math.max(Number(req.query.offset || 0), 0);
-        const { whereSql, params } = await buildListWhereClause(req, req.query, { ownOnly: true });
+        const { whereSql, params, meta } = await buildListWhereClause(req, req.query, { ownOnly: true });
+        const materialSelect = buildMaterialSelect(meta);
 
         const [rows] = await pool.execute(`
-            SELECT tm.*, s.name AS subject_name, s.code AS subject_code
+            SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
             ${whereSql}
@@ -213,13 +294,15 @@ router.get('/public', authenticateToken, async (req, res) => {
     try {
         const limit = Math.min(Number(req.query.limit || 20), 100);
         const offset = Math.max(Number(req.query.offset || 0), 0);
-        const { whereSql, params } = await buildListWhereClause(req, req.query, { publicOnly: true });
+        const { whereSql, params, meta } = await buildListWhereClause(req, req.query, { publicOnly: true });
+        const materialSelect = buildMaterialSelect(meta);
+        const uploadedBySql = getUploadedBySql(meta);
 
         const [rows] = await pool.execute(`
-            SELECT tm.*, s.name AS subject_name, s.code AS subject_code, u.first_name, u.last_name
+            SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code, u.first_name, u.last_name
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
-            LEFT JOIN users u ON tm.uploaded_by = u.id
+            LEFT JOIN users u ON ${uploadedBySql} = u.id
             ${whereSql}
             ORDER BY tm.download_count DESC, tm.created_at DESC
             LIMIT ? OFFSET ?
@@ -367,10 +450,11 @@ router.get('/', authenticateToken, async (req, res) => {
     try {
         const limit = Math.min(Number(req.query.limit || 50), 100);
         const offset = Math.max(Number(req.query.offset || 0), 0);
-        const { whereSql, params } = await buildListWhereClause(req, req.query);
+        const { whereSql, params, meta } = await buildListWhereClause(req, req.query);
+        const materialSelect = buildMaterialSelect(meta);
 
         const [rows] = await pool.execute(`
-            SELECT tm.*, s.name AS subject_name, s.code AS subject_code
+            SELECT ${materialSelect}, s.name AS subject_name, s.code AS subject_code
             FROM teaching_materials tm
             LEFT JOIN subjects s ON tm.subject_id = s.id
             ${whereSql}
