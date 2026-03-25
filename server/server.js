@@ -76,8 +76,12 @@ const buildCspConnectSrc = () => {
         .forEach((origin) => sources.add(origin));
 
     const r2AccountId = String(process.env.R2_ACCOUNT_ID || '').trim();
+    const r2BucketName = String(process.env.R2_BUCKET_NAME || '').trim();
     if (r2AccountId) {
         sources.add(`https://${r2AccountId}.r2.cloudflarestorage.com`);
+        if (r2BucketName) {
+            sources.add(`https://${r2BucketName}.${r2AccountId}.r2.cloudflarestorage.com`);
+        }
     }
 
     const r2PublicOrigin = toOrigin(process.env.R2_PUBLIC_BASE_URL);
