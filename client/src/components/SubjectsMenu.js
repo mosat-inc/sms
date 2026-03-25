@@ -988,6 +988,7 @@ const SubjectsMenu = () => {
   
   // Global upload tracking to prevent duplicates
   const activeUploads = useRef(new Set());
+  const previewObjectUrlRef = useRef(null);
 
   // Helper function to format file size
   const formatFileSize = useCallback((bytes) => {
@@ -1110,9 +1111,15 @@ const SubjectsMenu = () => {
   
   // Function to close file viewer and cleanup
   const handleCloseFileViewer = useCallback(() => {
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+    setMediaBlob(null);
+    setViewerError(null);
+    setViewerLoading(false);
     setShowFileViewer(false);
     setSelectedMaterial(null);
-    // Cleanup will be handled by the useEffect cleanup function
   }, []);
 
   const handleStaleMaterial = useCallback((material, message) => {
@@ -1160,8 +1167,35 @@ const SubjectsMenu = () => {
           }
           return { ...prev, ...normalizeMaterialForUi(accessInfo) };
         });
-        setMediaBlob(accessInfo?.viewUrl || null);
+
+        const { type } = getFileIcon(activeMaterial.name, activeMaterial.mimeType);
+        if (type === 'pdf' && accessInfo?.viewUrl) {
+          const response = await fetch(accessInfo.viewUrl, {
+            signal: controller.signal
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to load PDF preview (${response.status})`);
+          }
+
+          const pdfBlob = await response.blob();
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          if (previewObjectUrlRef.current) {
+            URL.revokeObjectURL(previewObjectUrlRef.current);
+          }
+
+          const objectUrl = URL.createObjectURL(pdfBlob);
+          previewObjectUrlRef.current = objectUrl;
+          setMediaBlob(objectUrl);
+        } else {
+          setMediaBlob(accessInfo?.viewUrl || null);
+        }
       } catch (err) {
+        if (err.name === 'AbortError') {
+          return;
+        }
         console.error('Error loading media:', err);
         if (err.message?.toLowerCase().includes('material not found')) {
           handleStaleMaterial(activeMaterial, 'This material no longer exists on the server. Re-upload it to restore preview.');
@@ -1178,8 +1212,12 @@ const SubjectsMenu = () => {
     
     return () => {
       controller.abort();
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+        previewObjectUrlRef.current = null;
+      }
     };
-  }, [handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
+  }, [getFileIcon, handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
