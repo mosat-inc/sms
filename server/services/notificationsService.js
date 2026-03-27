@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const util = require('util');
 const { sendEmail } = require('./emailService');
 const { sendMultiSMS } = require('./nextSmsService');
 const { getParentEmailsForStudent, getParentPhonesForStudent } = require('./parentContactService');
@@ -263,14 +264,16 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
               message: rest.message,
             }),
           });
-          console.log(`SMS sent/queued for student_id=${studentId} phones=${phones.length}`, smsResult);
+          console.log(
+            `SMS delivered/accepted for student_id=${studentId} phones=${phones.length}: ${util.inspect(smsResult, { depth: null, breakLength: 120 })}`
+          );
         } else {
           console.warn(`SMS skipped: no parent phone for student_id=${studentId}`);
         }
       } catch (smsErr) {
         console.warn(
           `SMS send failed for student_id=${studentId}:`,
-          smsErr?.response?.data || smsErr?.message || 'Unknown error'
+          util.inspect(smsErr?.response?.data || smsErr?.smsAttempts || smsErr?.message || 'Unknown error', { depth: null, breakLength: 120 })
         );
       }
 

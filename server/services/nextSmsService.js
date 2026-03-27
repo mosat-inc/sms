@@ -62,6 +62,46 @@ const extractAxiosErrorData = (error) => {
   };
 };
 
+const stringifyStatus = (status) => {
+  if (status == null) return '';
+  if (typeof status === 'string') return status.toLowerCase();
+  if (typeof status === 'object') {
+    return Object.values(status)
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+  }
+  return String(status).toLowerCase();
+};
+
+const messageLooksSuccessful = (message) => {
+  if (!message || typeof message !== 'object') return false;
+
+  const smsCount = Number(message.smsCount);
+  if (Number.isFinite(smsCount) && smsCount > 0) return true;
+
+  const statusText = stringifyStatus(message.status);
+  if (!statusText) return false;
+
+  return ['success', 'sent', 'queued', 'accepted', 'processing'].some((token) => statusText.includes(token));
+};
+
+const responseLooksSuccessful = (responseData) => {
+  if (!responseData) return false;
+
+  if (Array.isArray(responseData.messages) && responseData.messages.length > 0) {
+    return responseData.messages.some(messageLooksSuccessful);
+  }
+
+  if (typeof responseData.success === 'boolean') return responseData.success;
+
+  const topLevelStatus = stringifyStatus(responseData.status);
+  if (topLevelStatus) {
+    return ['success', 'sent', 'queued', 'accepted', 'processing'].some((token) => topLevelStatus.includes(token));
+  }
+
+  return true;
+};
+
 const createTransportStrategies = ({ url, sender, recipients, bodyText, reference }) => {
   const { username, password } = getCredentials();
   const singleRecipient = recipients.length === 1 ? recipients[0] : recipients;
@@ -155,6 +195,15 @@ const sendWithFallbackStrategies = async (strategies) => {
   for (const strategy of strategies) {
     try {
       const response = await axios(strategy.request);
+      if (!responseLooksSuccessful(response.data)) {
+        const error = new Error(`SMS gateway rejected response for transport ${strategy.label}`);
+        error.code = 'SMS_GATEWAY_REJECTED';
+        error.response = {
+          status: response.status,
+          data: response.data,
+        };
+        throw error;
+      }
       return {
         ...response.data,
         _transport: strategy.label,
@@ -198,6 +247,9 @@ const sendMultiSMS = async ({ toList, text, from }) => {
   const recipients = normalizePhoneList(toList);
   const bodyText = String(text || '').trim();
   if (!recipients.length || !bodyText) throw new Error('Valid "toList" and "text" are required');
+  if (recipients.length === 1) {
+    return sendSingleSMS({ to: recipients[0], text: bodyText, from });
+  }
 
   const url = `${getBaseUrl()}/api/sms/v1/text/multi`;
   const sender = getSenderId(from);
