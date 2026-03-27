@@ -12,6 +12,7 @@ const isSmsEnabled = () => {
 
 const getBaseUrl = () => String(process.env.NEXTSMS_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
 const buildReference = () => `sms-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const getApiToken = () => String(process.env.NEXTSMS_API_TOKEN || '').trim();
 const maskValue = (value, visible = 3) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -24,6 +25,12 @@ const buildAuthHeader = () => {
   const pass = String(process.env.NEXTSMS_PASSWORD || '').trim();
   if (!user || !pass) throw new Error('Missing NEXTSMS_USERNAME or NEXTSMS_PASSWORD');
   return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+};
+
+const buildBearerAuthHeader = () => {
+  const token = getApiToken();
+  if (!token) throw new Error('Missing NEXTSMS_API_TOKEN');
+  return `Bearer ${token}`;
 };
 
 const getCredentials = () => {
@@ -106,6 +113,7 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
   const { username, password } = getCredentials();
   const singleRecipient = recipients.length === 1 ? recipients[0] : recipients;
   const csvRecipients = recipients.join(',');
+  const bearerConfigured = Boolean(getApiToken());
   const payloads = [
     {
       label: 'with-sender',
@@ -151,6 +159,22 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
   ].filter((variant) => variant.label !== 'with-sender' || sender);
 
   return payloads.flatMap((variant) => ([
+    ...(bearerConfigured
+      ? [{
+          label: `json-bearer-v2-single:${variant.label}`,
+          request: {
+            method: 'post',
+            url: `${getBaseUrl()}/api/sms/v2/text/single`,
+            data: variant.json,
+            headers: {
+              Authorization: buildBearerAuthHeader(),
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            timeout: 20000,
+          },
+        }]
+      : []),
     {
       label: `json-basic-single:${variant.label}`,
       request: {
@@ -274,6 +298,7 @@ const sendMultiSMS = async ({ toList, text, from }) => {
 
   const url = `${getBaseUrl()}/api/sms/v1/text/multi`;
   const sender = getSenderId(from);
+  const bearerConfigured = Boolean(getApiToken());
 
   // Exact payload from official Postman docs:
   // { "messages":[{"from":"N-SMS","to":"2557...","text":"..."}, ...], "reference":"..." }
@@ -283,17 +308,21 @@ const sendMultiSMS = async ({ toList, text, from }) => {
   };
 
   try {
-    const response = await axios.post(url, payloadDocFormat, {
-      headers: {
-        Authorization: buildAuthHeader(),
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      timeout: 20000,
-    });
+    const response = await axios.post(
+      bearerConfigured ? `${getBaseUrl()}/api/sms/v2/text/multi` : url,
+      payloadDocFormat,
+      {
+        headers: {
+          Authorization: bearerConfigured ? buildBearerAuthHeader() : buildAuthHeader(),
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        timeout: 20000,
+      }
+    );
     return {
       ...response.data,
-      _transport: 'json-basic-multi',
+      _transport: bearerConfigured ? 'json-bearer-v2-multi' : 'json-basic-multi',
     };
   } catch (error) {
     // Fallback to /text/single with to array, which is also documented for one message to many destinations.
@@ -310,7 +339,23 @@ const getSmsBalance = async () => {
 
   const { username, password } = getCredentials();
   const url = `${getBaseUrl()}/api/sms/v1/balance`;
+  const bearerConfigured = Boolean(getApiToken());
   const strategies = [
+    ...(bearerConfigured
+      ? [{
+          label: 'json-bearer-v2-balance',
+          request: {
+            method: 'get',
+            url: `${getBaseUrl()}/api/v2/balance`,
+            headers: {
+              Authorization: buildBearerAuthHeader(),
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            timeout: 15000,
+          },
+        }]
+      : []),
     {
       label: 'json-basic-balance',
       request: {
@@ -357,12 +402,15 @@ const getSmsBalance = async () => {
 
 const getSmsGatewayStatus = () => {
   const { username } = getCredentials();
+  const apiToken = getApiToken();
 
   return {
     enabled: isSmsEnabled(),
     baseUrl: getBaseUrl(),
     senderId: getSenderId(),
     username: maskValue(username),
+    authMode: apiToken ? 'bearer-v2' : 'basic-v1-fallback',
+    apiToken: apiToken ? maskValue(apiToken, 6) : '',
   };
 };
 
