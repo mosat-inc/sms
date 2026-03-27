@@ -1,6 +1,6 @@
 import api from './http';
 
-const getAuthHeaders = () => {
+export const getAuthHeaders = () => {
   const token = localStorage.getItem('sms_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 };

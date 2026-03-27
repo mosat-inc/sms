@@ -28,7 +28,8 @@ import {
   uploadFileToSignedUrl,
   completeMaterialUpload,
   fetchMaterialAccessInfo,
-  downloadMaterialUrl
+  downloadMaterialUrl,
+  getAuthHeaders
 } from '../services/materialsService';
 
 const SubjectsMenuContainer = styled(PageContainer)`
@@ -944,7 +945,7 @@ const ProgressTracker = styled.div`
   }
 `;
 
-const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
+const PdfCanvasPreview = ({ fileUrl, materialId, title, onError }) => {
   const containerRef = useRef(null);
   const [isRendering, setIsRendering] = useState(true);
 
@@ -965,7 +966,8 @@ const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
         const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `${process.env.PUBLIC_URL || ''}/pdf.worker.min.mjs`;
         const loadingTask = pdfjsLib.getDocument({
-          url: fileUrl,
+          url: materialId ? `/api/materials/${materialId}/view` : fileUrl,
+          httpHeaders: getAuthHeaders(),
           withCredentials: false,
           disableAutoFetch: false,
           disableStream: false,
@@ -1030,7 +1032,7 @@ const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
     return () => {
       cancelled = true;
     };
-  }, [fileUrl, onError]);
+  }, [fileUrl, materialId, onError]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -1263,6 +1265,12 @@ const SubjectsMenu = () => {
       setViewerError(null);
       
       try {
+        const { type } = getFileIcon(activeMaterial.name, activeMaterial.mimeType);
+        if (type === 'pdf') {
+          setMediaBlob(`/api/materials/${activeMaterial.id}/view`);
+          return;
+        }
+
         const accessInfo = await fetchMaterialAccessInfo(activeMaterial.id);
         if (controller.signal.aborted) {
           return;
@@ -1296,7 +1304,7 @@ const SubjectsMenu = () => {
     return () => {
       controller.abort();
     };
-  }, [handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
+  }, [getFileIcon, handleStaleMaterial, normalizeMaterialForUi, selectedMaterialId, showFileViewer]);
 
   // Function to handle material download
   const handleDownloadMaterial = useCallback(async (material) => {
@@ -2247,6 +2255,7 @@ const SubjectsMenu = () => {
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
               <PdfCanvasPreview
                 fileUrl={mediaBlob}
+                materialId={selectedMaterial.id}
                 title={selectedMaterial.name}
                 onError={setViewerError}
               />
