@@ -964,18 +964,13 @@ const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
       try {
         const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `${process.env.PUBLIC_URL || ''}/pdf.worker.min.mjs`;
-
-        const response = await fetch(fileUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to load PDF preview (${response.status})`);
-        }
-
-        const pdfData = await response.arrayBuffer();
-        if (cancelled) {
-          return;
-        }
-
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const loadingTask = pdfjsLib.getDocument({
+          url: fileUrl,
+          withCredentials: false,
+          disableAutoFetch: false,
+          disableStream: false,
+          disableRange: false,
+        });
         const pdfDocument = await loadingTask.promise;
         const container = containerRef.current;
 
@@ -1012,9 +1007,13 @@ const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
             canvasContext: context,
             viewport,
           }).promise;
+
+          if (!cancelled && pageNumber === 1) {
+            setIsRendering(false);
+          }
         }
 
-        if (!cancelled) {
+        if (!cancelled && pdfDocument.numPages === 0) {
           setIsRendering(false);
         }
       } catch (error) {
@@ -1049,7 +1048,7 @@ const PdfCanvasPreview = ({ fileUrl, title, onError }) => {
           minHeight: '600px',
           overflowY: 'auto',
           padding: '16px',
-          display: isRendering ? 'none' : 'block'
+          display: 'block'
         }}
       />
     </div>
