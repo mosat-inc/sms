@@ -106,19 +106,57 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
   const { username, password } = getCredentials();
   const singleRecipient = recipients.length === 1 ? recipients[0] : recipients;
   const csvRecipients = recipients.join(',');
-
-  return [
+  const payloads = [
     {
-      label: 'json-basic-single',
+      label: 'with-sender',
+      json: {
+        from: sender,
+        to: singleRecipient,
+        text: bodyText,
+        reference,
+      },
+      formBasic: {
+        from: sender,
+        to: csvRecipients,
+        text: bodyText,
+        reference,
+      },
+      formDocs: {
+        username,
+        password,
+        sender_id: sender,
+        phone: csvRecipients,
+        message: bodyText,
+      },
+    },
+    {
+      label: 'without-sender',
+      json: {
+        to: singleRecipient,
+        text: bodyText,
+        reference,
+      },
+      formBasic: {
+        to: csvRecipients,
+        text: bodyText,
+        reference,
+      },
+      formDocs: {
+        username,
+        password,
+        phone: csvRecipients,
+        message: bodyText,
+      },
+    },
+  ].filter((variant) => variant.label !== 'with-sender' || sender);
+
+  return payloads.flatMap((variant) => ([
+    {
+      label: `json-basic-single:${variant.label}`,
       request: {
         method: 'post',
         url,
-        data: {
-          from: sender,
-          to: singleRecipient,
-          text: bodyText,
-          reference,
-        },
+        data: variant.json,
         headers: {
           Authorization: buildAuthHeader(),
           'Content-Type': 'application/json',
@@ -128,16 +166,11 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
       },
     },
     {
-      label: 'form-basic-single',
+      label: `form-basic-single:${variant.label}`,
       request: {
         method: 'post',
         url,
-        data: qs.stringify({
-          from: sender,
-          to: csvRecipients,
-          text: bodyText,
-          reference,
-        }),
+        data: qs.stringify(variant.formBasic),
         headers: {
           Authorization: buildAuthHeader(),
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -147,17 +180,11 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
       },
     },
     {
-      label: 'form-x-api-key-docs',
+      label: `form-x-api-key-docs:${variant.label}`,
       request: {
         method: 'post',
         url,
-        data: qs.stringify({
-          username,
-          password,
-          sender_id: sender,
-          phone: csvRecipients,
-          message: bodyText,
-        }),
+        data: qs.stringify(variant.formDocs),
         headers: {
           'X-API-KEY': Buffer.from(`${username}:${password}`).toString('base64'),
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -167,17 +194,11 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
       },
     },
     {
-      label: 'form-plain-docs',
+      label: `form-plain-docs:${variant.label}`,
       request: {
         method: 'post',
         url,
-        data: qs.stringify({
-          username,
-          password,
-          sender_id: sender,
-          phone: csvRecipients,
-          message: bodyText,
-        }),
+        data: qs.stringify(variant.formDocs),
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Accept: '*/*',
@@ -185,7 +206,7 @@ const createTransportStrategies = ({ url, sender, recipients, bodyText, referenc
         timeout: 20000,
       },
     },
-  ];
+  ]));
 };
 
 const sendWithFallbackStrategies = async (strategies) => {

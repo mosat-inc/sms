@@ -273,7 +273,13 @@ const createParentNotificationForStudent = async ({ studentId, ...rest }) => {
       } catch (smsErr) {
         console.warn(
           `SMS send failed for student_id=${studentId}:`,
-          util.inspect(smsErr?.response?.data || smsErr?.smsAttempts || smsErr?.message || 'Unknown error', { depth: null, breakLength: 120 })
+          util.inspect(
+            {
+              error: smsErr?.response?.data || smsErr?.message || 'Unknown error',
+              attempts: smsErr?.smsAttempts || [],
+            },
+            { depth: null, breakLength: 120 }
+          )
         );
       }
 
